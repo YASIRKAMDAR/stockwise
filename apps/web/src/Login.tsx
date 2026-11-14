@@ -4,13 +4,13 @@ import { InstallApp } from './ui/InstallApp';
 
 export function Login({ onDone }: { onDone: () => void }) {
   const device = getDevice();
-  const [mode, setMode] = useState<'pin' | 'password'>(device ? 'pin' : 'password');
+  const [mode, setMode] = useState<'pin' | 'password'>('pin');
   const [code, setCode] = useState(''), [secret, setSecret] = useState('');
   const [busy, setBusy] = useState(false), [error, setError] = useState<unknown>(null);
   const submit = async (e: React.FormEvent) => {
     e.preventDefault(); setBusy(true); setError(null);
     try {
-      if (mode === 'pin') await api('POST', '/auth/staff-login', { employeeCode: code.trim().toUpperCase(), pin: secret, deviceId: device!.deviceId, deviceSecret: device!.deviceSecret });
+      if (mode === 'pin') await api('POST', '/auth/staff-login', { employeeCode: code.trim().toUpperCase(), pin: secret, ...(device ? { deviceId: device.deviceId, deviceSecret: device.deviceSecret } : {}) });
       else await api('POST', '/auth/login', { employeeCode: code.trim().toUpperCase(), password: secret });
       setSecret(''); onDone();
     } catch (err) { setError(err); } finally { setBusy(false); }
@@ -23,13 +23,10 @@ export function Login({ onDone }: { onDone: () => void }) {
           <button aria-pressed={mode === 'pin'} onClick={() => setMode('pin')} type="button">Staff</button>
           <button aria-pressed={mode === 'password'} onClick={() => setMode('password')} type="button">Manager / Owner</button>
         </div>
-        {mode === 'pin' && !device ? (
-          <div className="banner warn">This phone is not set up for staff yet. A manager must sign in here once and choose <b>Enroll this device for staff</b> in Settings.</div>
-        ) : (
+        {(
           <form className="stack" onSubmit={submit}>
-            {mode === 'pin' && <div className="small muted">Device: {device!.label}</div>}
-            <label className="field">Employee code<input autoComplete="username" autoCapitalize="characters" value={code} onChange={(e) => setCode(e.target.value)} required /></label>
-            <label className="field">{mode === 'pin' ? 'PIN (4 digits)' : 'Password'}
+            <label className="field">{mode === 'pin' ? 'Your code' : 'Employee code'}<input autoComplete="username" autoCapitalize="characters" value={code} onChange={(e) => setCode(e.target.value)} required /></label>
+            <label className="field">{mode === 'pin' ? 'Passcode' : 'Password'}
               <input type="password" inputMode={mode === 'pin' ? 'numeric' : undefined} autoComplete={mode === 'pin' ? 'off' : 'current-password'} value={secret} onChange={(e) => setSecret(e.target.value)} required />
             </label>
             {error ? <div className="banner bad" role="alert">{errorText(error)}</div> : null}

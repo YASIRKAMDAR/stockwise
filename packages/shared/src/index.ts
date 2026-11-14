@@ -79,8 +79,9 @@ export const qty = z.number().int().positive().max(100000);
 export const StaffLoginBody = z.object({
   employeeCode: z.string().min(1).max(40),
   pin: z.string().regex(/^\d{4,8}$/),
-  deviceId: uuid,
-  deviceSecret: z.string().min(16).max(200),
+  /** Optional: a phone set up by a manager pins the session to that hotel. Without it staff sign in with code + passcode alone. */
+  deviceId: uuid.optional(),
+  deviceSecret: z.string().min(16).max(200).optional(),
   hotelId: uuid.optional(),
 });
 export const PasswordLoginBody = z.object({

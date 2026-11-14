@@ -48,7 +48,8 @@ async function checkLock(db: Db, cfg: Config, user: any, ok: boolean) {
 }
 
 /** Staff PIN login: only from an enrolled, non-revoked device; session pinned to the device's hotel. */
-export async function staffLogin(db: Db, cfg: Config, b: { employeeCode: string; pin: string; deviceId: string; deviceSecret: string }) {
+export async function staffLogin(db: Db, cfg: Config, b: { employeeCode: string; pin: string; deviceId?: string; deviceSecret?: string; hotelId?: string }) {
+  if (!b.deviceId || !b.deviceSecret) return staffLoginNoDevice(db, cfg, b);
   const d = await db.query('SELECT id, organization_id, hotel_id, secret_hash, revoked_at FROM devices WHERE id = $1', [b.deviceId]);
   const dev = d.rows[0];
   if (!dev || dev.revoked_at || !timingSafeEqual(Buffer.from(dev.secret_hash), Buffer.from(sha256(b.deviceSecret)))) {
@@ -71,6 +72,29 @@ export async function staffLogin(db: Db, cfg: Config, b: { employeeCode: string;
   await db.query('UPDATE devices SET last_seen_at = now() WHERE id = $1', [dev.id]);
   await audit(db, user.organization_id, user.id, 'LOGIN_PIN', { deviceId: dev.id });
   return createSession(db, cfg, user.id, 'PIN', dev.id, dev.hotel_id);
+}
+
+/** Staff sign-in with employee code + passcode on any phone (no manager setup). Protected by the same lockout as passwords. */
+async function staffLoginNoDevice(db: Db, cfg: Config, b: { employeeCode: string; pin: string; hotelId?: string }) {
+  const u = await db.query(
+    `SELECT u.* FROM users u WHERE u.employee_code = $1 AND u.active AND u.pin_hash IS NOT NULL
+        AND EXISTS (SELECT 1 FROM hotel_memberships m WHERE m.user_id = u.id AND m.role = 'STAFF')`, [b.employeeCode]);
+  if (u.rowCount !== 1) {
+    await verifySecret(await dummyHash(), b.pin);
+    throw err('UNAUTHENTICATED', 'Employee code or passcode is incorrect');
+  }
+  const user = u.rows[0];
+  if (user.locked_until && new Date(user.locked_until) > new Date()) throw err('ACCOUNT_LOCKED', 'Too many attempts. Try again in 15 minutes or ask a manager.');
+  const ok = await verifySecret(user.pin_hash, b.pin);
+  await checkLock(db, cfg, user, ok);
+  if (!ok) throw err('UNAUTHENTICATED', 'Employee code or passcode is incorrect');
+  const m = await db.query(
+    `SELECT m.hotel_id FROM hotel_memberships m JOIN hotels h ON h.id = m.hotel_id WHERE m.user_id = $1 AND m.role = 'STAFF' AND h.active ORDER BY h.code`, [user.id]);
+  const hotels = m.rows.map((r) => r.hotel_id as string);
+  const hotelId = b.hotelId && hotels.includes(b.hotelId) ? b.hotelId : hotels[0];
+  if (!hotelId) throw err('FORBIDDEN', 'You are not assigned to a hotel yet. Ask your manager.');
+  await audit(db, user.organization_id, user.id, 'LOGIN_PIN', { device: null });
+  return createSession(db, cfg, user.id, 'PIN', null, hotelId);
 }
 
 /** Manager/owner password login (min 10 chars, argon2id, lockout). TOTP is listed in remaining work. */

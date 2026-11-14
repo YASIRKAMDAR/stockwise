@@ -161,3 +161,20 @@ describe('Input validation', () => {
     expect(r.body).toContain(`"'=HYPERLINK(""http://evil"")"`);
   });
 });
+
+describe('Staff sign-in without phone setup', () => {
+  it('code + passcode works on any phone and lands on the staff hotel', async () => {
+    const c = new Client(w.app);
+    const r = await c.post('/auth/staff-login', { employeeCode: 'S1A', pin: '1234' }, { key: null });
+    expect(r.status).toBe(200);
+    const me = await c.get('/me');
+    expect(me.body.role).toBe('STAFF');
+    expect(me.body.activeHotel).toBe(w.h[0]);
+  });
+  it('wrong passcode is rejected and still counts towards lockout', async () => {
+    const c = new Client(w.app);
+    const r = await c.post('/auth/staff-login', { employeeCode: 'S1A', pin: '9999' }, { key: null });
+    expect(r.status).toBe(401);
+    await c.post('/auth/staff-login', { employeeCode: 'S1A', pin: '1234' }, { key: null }); // reset counter
+  });
+});
