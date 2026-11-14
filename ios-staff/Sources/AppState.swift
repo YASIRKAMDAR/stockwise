@@ -165,7 +165,7 @@ final class AppState: ObservableObject {
             if text.isEmpty { self.missed() } else { self.interpret(text, durationMs: Int(Date().timeIntervalSince(started) * 1000)) }
         })
     }
-    func voiceSend() { if voiceLive { mic.release() } }
+    func voiceSend() { if voiceLive { mic.stopTalking() } }
     func voiceCancel() { if voiceLive { mic.cancel() } }
     func voiceHint() {
         notice = Notice(text: !mic.available(lang: lang) ? t.noVoiceLang : !mic.hasPermission() ? t.micDenied : t.holdHint)
@@ -236,7 +236,7 @@ final class AppState: ObservableObject {
             if answer { self.confirm() } else { self.flow = nil }
         })
     }
-    func yesNoSend() { if hearingYesNo { mic.release() } }
+    func yesNoSend() { if hearingYesNo { mic.stopTalking() } }
     func yesNoCancel() { if hearingYesNo { mic.cancel() } }
 
     /// Save the job. Without signal it is kept on the phone and sent later, never twice.

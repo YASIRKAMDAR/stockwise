@@ -9,7 +9,7 @@ protocol Mic: AnyObject {
     func requestPermission(_ done: @escaping (Bool) -> Void)
     /// onDone: nil = cancelled, "" = nothing heard, otherwise the words. Always called on the main thread.
     func start(lang: String, onInterim: @escaping (String) -> Void, onDone: @escaping (String?) -> Void)
-    func release()
+    func stopTalking()
     func cancel()
     func say(_ text: String, lang: String)
 }
@@ -77,7 +77,7 @@ final class SpeechMic: NSObject, Mic {
     }
 
     /// Mic released: stop listening and hand over what was heard.
-    func release() {
+    func stopTalking() {
         guard !finished else { return }
         let gen = generation
         stopAudio()
