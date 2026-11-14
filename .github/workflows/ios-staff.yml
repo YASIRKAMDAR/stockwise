@@ -1,0 +1,76 @@
+name: Staff app (iPhone)
+
+on:
+  push:
+    branches: [main]
+    paths: ['ios-staff/**', '.github/workflows/ios-staff.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Generate the Xcode project
+        run: |
+          brew install xcodegen
+          cd ios-staff && xcodegen generate
+          xcodebuild -version
+
+      - name: Pick an iPhone simulator
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c "
+          import json, re, sys
+          d = json.load(sys.stdin)['devices']
+          def ver(k):
+              m = re.search(r'iOS-(\d+)-(\d+)', k)
+              return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+          for k in sorted([k for k in d if 'iOS' in k], key=ver, reverse=True):
+              phones = [x for x in d[k] if x['name'].startswith('iPhone')]
+              plain = [x for x in phones if re.fullmatch(r'iPhone \d+', x['name'])]
+              if phones:
+                  print((plain or phones)[0]['udid']); break
+          ")
+          echo "Simulator: $UDID"
+          xcrun simctl list devices available | grep "$UDID" || true
+          echo "UDID=$UDID" >> "$GITHUB_ENV"
+
+      - name: Build, test and render screens
+        id: test
+        continue-on-error: true
+        working-directory: ios-staff
+        run: |
+          set -o pipefail
+          xcodebuild test -project StockwiseStaff.xcodeproj -scheme StockwiseStaff \
+            -destination "platform=iOS Simulator,id=$UDID" -derivedDataPath build 2>&1 | tee build.log | tail -n 60
+
+      - name: Collect files
+        if: always()
+        run: |
+          mkdir -p out
+          grep -nE "error:|warning: unre|Test Case .* failed|\*\* TEST|\*\* BUILD|Executed [0-9]+ tests|XCTAssert|: fatal" ios-staff/build.log | head -150 > out/ios-build-summary.txt || true
+          tail -n 80 ios-staff/build.log >> out/ios-build-summary.txt || true
+          if ls /tmp/stockwise-screens/*.png >/dev/null 2>&1; then (cd /tmp/stockwise-screens && zip -q "$GITHUB_WORKSPACE/out/ios-screens.zip" *.png); fi
+          ls -la out
+
+      - name: Publish screens and build summary
+        if: always()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: staff-ios-build-${{ github.run_number }}
+          name: Stockwise Staff (iPhone) build ${{ github.run_number }}
+          prerelease: true
+          make_latest: false
+          files: out/*
+          body: |
+            iPhone staff app, built and rendered in the iOS simulator. Result: ${{ steps.test.outcome }}.
+            This is not installable. Installing on iPhones needs an Apple Developer account (TestFlight).
+
+      - name: Fail if the build or tests failed
+        if: steps.test.outcome != 'success'
+        run: exit 1
