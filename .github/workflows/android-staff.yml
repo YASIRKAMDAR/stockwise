@@ -33,7 +33,7 @@ jobs:
 
       - name: Render screens (Roborazzi)
         working-directory: android-staff
-        run: gradle :app:testDebugUnitTest --no-daemon
+        run: gradle :app:recordRoborazziDebug --no-daemon
         continue-on-error: true
 
       - name: Build APK
