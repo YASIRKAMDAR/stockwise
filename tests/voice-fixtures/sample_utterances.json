@@ -1,0 +1,15 @@
+[
+  {"language":"en-IN","audioText":"Placed two soaps and one shampoo in room 203","expected":{"action":"PLACE_IN_ROOM","items":[{"sku":"SOAP","qty":2,"room":"203"},{"sku":"SHAMPOO","qty":1,"room":"203"}]}},
+  {"language":"hi-IN","audioText":"कमरा 101 में दो साबुन और एक शैम्पू रखा","expected":{"action":"PLACE_IN_ROOM","items":[{"sku":"SOAP","qty":2,"room":"101"},{"sku":"SHAMPOO","qty":1,"room":"101"}]}},
+  {"language":"gu-IN","audioText":"રૂમ ૨૦૩ માં બે સાબુ અને એક શેમ્પૂ મૂક્યા","expected":{"action":"PLACE_IN_ROOM","items":[{"sku":"SOAP","qty":2,"room":"203"},{"sku":"SHAMPOO","qty":1,"room":"203"}]}},
+  {"language":"mixed","audioText":"Room 101 mein do soap aur room 102 mein teen shampoo rakha","expected":{"action":"PLACE_IN_ROOM","items":[{"sku":"SOAP","qty":2,"room":"101"},{"sku":"SHAMPOO","qty":3,"room":"102"}]}},
+  {"language":"hi-IN","audioText":"होटल दो को बीस डेंटल किट भेजे","expected":{"action":"TRANSFER_DISPATCH","destinationHotelCode":"2","items":[{"sku":"DENTAL_KIT","qty":20}]}},
+  {"language":"gu-IN","audioText":"હોટેલ બે ને વીસ ડેન્ટલ કિટ મોકલી","expected":{"action":"TRANSFER_DISPATCH","destinationHotelCode":"2","items":[{"sku":"DENTAL_KIT","qty":20}]}},
+  {"language":"mixed","audioText":"Store se 10 comb liye","expected":{"action":"CHECKOUT_TO_STAFF","items":[{"sku":"COMB","qty":10}]}},
+  {"language":"en-IN","audioText":"Received thirty shampoos from the supplier","expected":{"action":"SUPPLIER_RECEIPT","items":[{"sku":"SHAMPOO","qty":30}]}},
+  {"language":"gu-IN","audioText":"પાંચ સાબુ પાછા સ્ટોરમાં મૂક્યા","expected":{"action":"RETURN_TO_STORE","items":[{"sku":"SOAP","qty":5}]}},
+  {"language":"mixed","audioText":"Room 201 main 50 nahi 15 soap rakhna","expected":{"action":"PLACE_IN_ROOM","items":[{"sku":"SOAP","qty":15,"room":"201"}],"needsHumanReview":true}},
+  {"language":"en-IN","audioText":"How many soaps are left in Hotel 3?","expected":{"action":"STOCK_QUERY","destinationHotelCode":"3"}},
+  {"language":"hi-IN","audioText":"शैम्पू आए हैं","expected":{"action":"SUPPLIER_RECEIPT","needsClarification":"quantity"}}
+]
+

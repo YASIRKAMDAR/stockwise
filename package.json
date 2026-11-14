@@ -1,0 +1,22 @@
+{
+  "name": "stockwise",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "typecheck": "npm run typecheck -w @stockwise/shared -w @stockwise/api -w @stockwise/web",
+    "test": "npm run test -w @stockwise/api",
+    "build": "npm run build -w @stockwise/web && npm run build -w @stockwise/api",
+    "db:migrate": "npm run db:migrate -w @stockwise/api",
+    "db:seed:demo": "npm run db:seed:demo -w @stockwise/api",
+    "dev:api": "npm run dev -w @stockwise/api",
+    "dev:web": "npm run dev -w @stockwise/web",
+    "build:vercel": "node scripts/build-vercel.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

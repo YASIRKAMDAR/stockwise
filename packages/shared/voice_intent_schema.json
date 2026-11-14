@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StockwiseVoiceProposal",
+  "description": "Machine-interpreted proposal only. Always validate on the backend and require staff confirmation before changing inventory.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["language", "action", "items", "clarificationNeeded", "clarificationQuestion", "transcript", "notes"],
+  "properties": {
+    "language": {"type": "string", "enum": ["gu-IN", "hi-IN", "en-IN", "mixed", "unknown"]},
+    "action": {"type": "string", "enum": ["SUPPLIER_RECEIPT", "CHECKOUT_TO_STAFF", "PLACE_IN_ROOM", "RETURN_TO_STORE", "TRANSFER_DISPATCH", "TRANSFER_RECEIPT", "STOCK_QUERY", "UNKNOWN"]},
+    "transcript": {"type": "string"},
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["spokenProduct", "quantity", "roomNumber", "targetHotelCode", "sourceHint"],
+        "properties": {
+          "spokenProduct": {"type": "string"},
+          "quantity": {"type": ["integer", "null"], "minimum": 1},
+          "roomNumber": {"type": ["string", "null"]},
+          "targetHotelCode": {"type": ["string", "null"]},
+          "sourceHint": {"type": ["string", "null"], "enum": ["STORE", "MY_STOCK", null]}
+        }
+      }
+    },
+    "clarificationNeeded": {"type": "boolean"},
+    "clarificationQuestion": {"type": ["string", "null"]},
+    "notes": {"type": ["string", "null"]}
+  }
+}
+

@@ -1,0 +1,68 @@
+# Production stack for one Ubuntu VPS. Only Caddy publishes ports; Postgres and the API stay on the private network.
+name: stockwise
+services:
+  caddy:
+    image: caddy:2.8
+    restart: unless-stopped
+    ports: ["80:80", "443:443", "443:443/udp"]
+    environment:
+      STOCKWISE_DOMAIN: ${STOCKWISE_DOMAIN:?set STOCKWISE_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [api]
+    networks: [edge]
+
+  api:
+    build: { context: .., dockerfile: Dockerfile }
+    image: stockwise-api:latest
+    restart: unless-stopped
+    env_file: ../.env
+    environment:
+      DATABASE_URL: postgresql://stockwise:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/stockwise
+      TRUST_PROXY: "true"
+      API_HOST: 0.0.0.0
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [edge, private]
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: stockwise
+      POSTGRES_USER: stockwise
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stockwise -d stockwise"]
+      interval: 10s
+      retries: 6
+    networks: [private]
+    # No "ports:" — PostgreSQL is never published on the host.
+
+  backup:
+    image: postgres:16
+    restart: "no"
+    profiles: [backup]
+    env_file: ../.env
+    environment:
+      PGHOST: postgres
+      PGUSER: stockwise
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: stockwise
+    volumes:
+      - ./backup.sh:/backup.sh:ro
+      - backup_staging:/backups
+    entrypoint: ["bash", "/backup.sh"]
+    networks: [private, egress]
+
+volumes: { pgdata: {}, caddy_data: {}, caddy_config: {}, backup_staging: {} }
+networks:
+  edge: {}
+  egress: {}
+  private: { internal: true }
