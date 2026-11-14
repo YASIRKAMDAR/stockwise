@@ -13,7 +13,10 @@ export class GeminiProvider implements VoiceProvider {
   async extract(audio: Buffer, mimeType: string, ctx: CatalogContext): Promise<ExtractResult> {
     const body = {
       systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-      contents: [{ role: 'user', parts: [{ text: contextText(ctx) }, { inlineData: { mimeType, data: audio.toString('base64') } }] }],
+      contents: [{ role: 'user', parts: [{ text: contextText(ctx) }, mimeType === 'text/plain'
+        // Typed in the app's text box instead of spoken: same extraction, from text.
+        ? { text: `The user typed this instead of speaking. Treat it exactly like a transcript:\n${audio.toString('utf8').slice(0, 500)}` }
+        : { inlineData: { mimeType, data: audio.toString('base64') } }] }],
       generationConfig: { responseMimeType: 'application/json', responseJsonSchema: RESPONSE_JSON_SCHEMA, temperature: 0, maxOutputTokens: 2048 },
     };
     const url = `${this.cfg.GEMINI_API_BASE}/models/${encodeURIComponent(this.cfg.GEMINI_MODEL)}:generateContent`;

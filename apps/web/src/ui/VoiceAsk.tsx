@@ -3,7 +3,9 @@ import { useEffect, useRef, useState } from 'react';
 import { api, errorText } from '../api';
 import { speak } from '../i18n';
 import { useMe } from './common';
-import { IconMic, IconSpeaker, IconStop } from './icons';
+import { IconSpeaker } from './icons';
+import { Composer } from './Composer';
+import { hasSpeechRecognition, recognize, type Listener } from './speech';
 
 export type VoiceGo = 'SHOW_ALERTS' | 'SHOW_TRANSFERS' | 'SHOW_ROOM_USE' | 'SHOW_CHANGES' | 'START_COUNT';
 const OPENING: Record<VoiceGo, string> = {
@@ -11,15 +13,17 @@ const OPENING: Record<VoiceGo, string> = {
   SHOW_CHANGES: 'Opening recent changes.', START_COUNT: 'Opening the weekly count.',
 };
 
-export function VoiceAsk({ hotelId, scopeAll, onGo }: { hotelId: string; scopeAll: boolean; onGo: (a: VoiceGo, targetHotelId: string | null) => void }) {
+export function VoiceAsk({ hotelId, scopeAll, onGo, docked = false }: { hotelId: string; scopeAll: boolean; onGo: (a: VoiceGo, targetHotelId: string | null) => void; docked?: boolean }) {
   const { me } = useMe();
   const [state, setState] = useState<'idle' | 'recording' | 'thinking'>('idle');
   const [answer, setAnswer] = useState<{ heard?: string; text: string; rows?: any[]; tone?: 'warn' } | null>(null);
-  const [typed, setTyped] = useState('');
+  const [interim, setInterim] = useState('');
   const rec = useRef<MediaRecorder | null>(null);
+  const ear = useRef<Listener | null>(null);
+  const want = useRef<'hold' | 'send' | 'cancel'>('hold');
   const started = useRef(0);
-  const timer = useRef<number | null>(null);
-  useEffect(() => () => { if (timer.current) clearInterval(timer.current); rec.current?.stream.getTracks().forEach((t) => t.stop()); }, []);
+  useEffect(() => () => { rec.current?.stream.getTracks().forEach((t) => t.stop()); ear.current?.abort(); }, []);
+  useEffect(() => { if (state !== 'recording') return; const id = setTimeout(() => finish('send'), me.config.voiceMaxSeconds * 1000); return () => clearTimeout(id); }, [state]);
   if (me.config.voiceProvider === 'disabled') return null;
 
   const respond = (p: any) => {
@@ -46,50 +50,65 @@ export function VoiceAsk({ hotelId, scopeAll, onGo }: { hotelId: string; scopeAl
     fd.append('audio', blob, name);
     try { respond(await api('POST', '/voice/interpret', fd)); } catch (e) { setAnswer({ text: errorText(e), tone: 'warn' }); } finally { setState('idle'); }
   };
+  const browserEar = me.config.voiceProvider === 'fake' && hasSpeechRecognition();
+  const canVoice = browserEar || (me.config.voiceProvider !== 'fake' && !!navigator.mediaDevices?.getUserMedia);
   const start = async () => {
-    setAnswer(null);
+    setAnswer(null); setInterim(''); want.current = 'hold';
+    if (browserEar) {
+      started.current = Date.now(); setState('recording');
+      ear.current = recognize(me.language, { continuous: true, onInterim: setInterim, onEnd: (text, err) => {
+        ear.current = null; setInterim('');
+        if (err === 'not-allowed') { setState('idle'); setAnswer({ text: 'The microphone is blocked. Allow it in the browser, or type your question.', tone: 'warn' }); return; }
+        if (want.current === 'cancel' || !text) { setState('idle'); return; }
+        send(new Blob([text], { type: 'text/plain' }), 'ask.txt', Date.now() - started.current);
+      } });
+      if (!ear.current) setState('idle');
+      return;
+    }
     let stream: MediaStream;
     try { stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1 } }); } catch { setAnswer({ text: 'The microphone is blocked. Allow it in the browser, or type your question.', tone: 'warn' }); return; }
+    if (want.current !== 'hold') { stream.getTracks().forEach((t) => t.stop()); setAnswer({ text: 'Keep holding the mic while you speak, then let go.', tone: 'warn' }); return; }
     const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find((m) => MediaRecorder.isTypeSupported(m));
     const r = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
     const chunks: Blob[] = [];
     r.ondataavailable = (e) => e.data.size && chunks.push(e.data);
-    r.onstop = () => { stream.getTracks().forEach((t) => t.stop()); if (timer.current) clearInterval(timer.current); const d = Date.now() - started.current; if (d < 600) { setState('idle'); return; } send(new Blob(chunks, { type: (r.mimeType || 'audio/webm').split(';')[0] }), 'ask', d); };
+    r.onstop = () => { stream.getTracks().forEach((t) => t.stop()); const d = Date.now() - started.current; if (want.current === 'cancel' || d < 600) { setState('idle'); return; } send(new Blob(chunks, { type: (r.mimeType || 'audio/webm').split(';')[0] }), 'ask', d); };
     rec.current = r; started.current = Date.now(); r.start(); setState('recording');
-    timer.current = window.setInterval(() => { if (Date.now() - started.current > me.config.voiceMaxSeconds * 1000 && r.state === 'recording') r.stop(); }, 300);
   };
-  const stop = () => rec.current?.state === 'recording' && rec.current.stop();
+  const finish = (how: 'send' | 'cancel') => {
+    want.current = how;
+    if (ear.current) { if (how === 'send') ear.current.stop(); else { ear.current.abort(); ear.current = null; setState('idle'); setInterim(''); } }
+    if (rec.current?.state === 'recording') rec.current.stop();
+  };
 
-  return (
-    <section className="ask" aria-live="polite">
-      <div className="askbar">
-        <button className={`askmic${state === 'recording' ? ' rec' : ''}`} onClick={state === 'recording' ? stop : start} disabled={state === 'thinking'} aria-label={state === 'recording' ? 'Stop' : 'Ask by voice'}>
-          {state === 'recording' ? <IconStop /> : <IconMic />}
-        </button>
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontWeight: 700 }}>{state === 'recording' ? 'Listening… tap to stop' : state === 'thinking' ? 'Finding the answer…' : 'Ask about your stock'}</div>
-          <div className="small faint">“What is running low?” · “How much soap at Hotel 2?” · “Start the weekly count”</div>
-        </div>
-      </div>
-      {me.config.voiceProvider === 'fake' && (
-        <form className="row" style={{ flexWrap: 'nowrap' }} onSubmit={(e) => { e.preventDefault(); if (typed.trim()) send(new Blob([typed], { type: 'text/plain' }), 'ask.txt', 0); }}>
-          <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="Test mode: type a question" aria-label="Type a question" />
-          <button className="btn">Ask</button>
-        </form>
-      )}
-      {answer && (
-        <div className={`answer${answer.tone ? ' warn' : ''}`}>
+  const card = answer && (
+    <div className={`bubble${answer.tone ? ' warn' : ''}`}>
+      <div className="row spread" style={{ flexWrap: 'nowrap', alignItems: 'flex-start' }}>
+        <div style={{ minWidth: 0 }}>
           {answer.heard && <div className="small faint">You asked: “{answer.heard}”</div>}
-          <div className="row spread" style={{ flexWrap: 'nowrap', alignItems: 'flex-start' }}>
-            <div style={{ fontWeight: 600 }}>{answer.text}</div>
-            {answer.rows && <button className="btn quiet" aria-label="Read aloud" onClick={() => speak(answer.text, me.language)}><IconSpeaker /></button>}
-          </div>
-          {answer.rows && answer.rows.length > 0 && (
-            <table><thead><tr><th>Item</th><th>Hotel</th><th className="num">In store</th><th className="num">With staff</th></tr></thead>
-              <tbody>{answer.rows.map((r: any) => <tr key={r.hotelId + r.productId}><td>{r.name}</td><td>{r.hotelName}</td><td className="num">{r.store}{r.low ? ' ▲' : ''}</td><td className="num">{r.staffHeld}</td></tr>)}</tbody></table>
-          )}
+          <div style={{ fontWeight: 600 }}>{answer.text}</div>
         </div>
+        <span className="row" style={{ flexWrap: 'nowrap', gap: 4 }}>
+          {answer.rows && <button className="btn quiet" aria-label="Read aloud" onClick={() => speak(answer.text, me.language)}><IconSpeaker /></button>}
+          <button className="btn quiet" aria-label="Close answer" onClick={() => setAnswer(null)}>✕</button>
+        </span>
+      </div>
+      {answer.rows && answer.rows.length > 0 && (
+        <table><thead><tr><th>Item</th><th>Hotel</th><th className="num">In store</th><th className="num">With staff</th></tr></thead>
+          <tbody>{answer.rows.map((r: any) => <tr key={r.hotelId + r.productId}><td>{r.name}</td><td>{r.hotelName}</td><td className="num">{r.store}{r.low ? ' ▲' : ''}</td><td className="num">{r.staffHeld}</td></tr>)}</tbody></table>
       )}
+    </div>
+  );
+  return (
+    <section className={docked ? undefined : 'ask'}>
+      {!docked && <div style={{ fontWeight: 700, marginBottom: 6 }}>Ask about your stock <span className="small faint" style={{ fontWeight: 400 }}>· “What is running low?” · “How much soap at Hotel 2?”</span></div>}
+      <Composer docked={docked} placeholder="Ask: what is running low?" feed={card}
+        labels={{ hold: 'Hold to ask', slide: '◀ Slide to cancel', releaseCancel: 'Release to cancel', send: 'Ask' }}
+        onText={(text) => { setAnswer(null); send(new Blob([text], { type: 'text/plain' }), 'ask.txt', 0); }}
+        voice={{ available: canVoice, live: state === 'recording', startedAt: started.current, interim, busy: state === 'thinking',
+          onStart: start, onSend: () => finish('send'), onCancel: () => finish('cancel'),
+          onTap: () => setAnswer({ text: 'Hold the mic while you ask, then let go. Or type your question.', tone: 'warn' }),
+          onUnavailable: () => setAnswer({ text: 'Voice isn’t available in this browser. Type your question instead.', tone: 'warn' }) }} />
     </section>
   );
 }

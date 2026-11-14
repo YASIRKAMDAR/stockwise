@@ -7,6 +7,7 @@ import { CountHistory, WeeklyCount } from '../manager/Count';
 import { Settings } from './Settings';
 import { Changes, StockCards, TransferCards } from '../manager/ManagerApp';
 import { VoiceAsk, type VoiceGo } from '../ui/VoiceAsk';
+import { BurgerMenu } from '../ui/Menu';
 
 export type Page = 'today' | 'count' | 'stock' | 'usage' | 'transfers' | 'history' | 'activity' | 'reports' | 'settings';
 
@@ -30,40 +31,28 @@ export function AdminApp() {
   const pickerOptions = isOwner ? [{ id: 'all', name: `All ${managed.length} hotels` }, ...managed] : managed;
 
   if (phone) {
-    const tabs: [Page, string, () => JSX.Element][] = [['today', 'Today', IconHome], ['stock', 'Stock', IconStore], ['usage', 'Room use', IconChart], ['activity', 'Changes', IconList], ['settings', 'More', IconSettings]];
-    const moreSet: Page[] = ['settings', 'transfers', 'history', 'reports'];
     return (
-      <div className="app mshell">
+      <div className="app mshell nobottom">
         <header className="topbar">
-          <div className="who">
-            <select aria-label="Hotel" value={hotel} onChange={(e) => setHotel(e.target.value)} style={{ fontWeight: 700 }}>{pickerOptions.map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}</select>
-            <div className="small muted">{me.displayName} · Owner</div>
+          <BurgerMenu who={<><b>{me.displayName}</b><div className="small">{isOwner ? 'Owner' : 'Manager'}</div></>}
+            items={pages.map(([k, l, Icon]) => ({ key: k, label: l, Icon, current: page === k, onClick: () => setPage(k) }))} onSignOut={logout} />
+          <div className="who" style={{ flex: 1, minWidth: 0 }}>
+            <select aria-label="Hotel" value={hotel} onChange={(e) => setHotel(e.target.value)} style={{ fontWeight: 700, maxWidth: '100%' }}>{pickerOptions.map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}</select>
+            <div className="small muted">{pages.find((x) => x[0] === page)?.[1]}</div>
           </div>
-          <button className="link" onClick={logout}>Sign out</button>
         </header>
         <main className="content">
-          {page === 'today' && <Today hotel={hotel} go={setPage} isOwner />}
+          {page === 'today' && <Today hotel={hotel} go={setPage} isOwner={isOwner} showAsk={false} />}
+          {page === 'count' && <WeeklyCount hotelId={hotel === 'all' ? managed[0].id : hotel} />}
           {page === 'stock' && <StockCards hotelId={hotel} />}
           {page === 'usage' && <Usage hotel={hotel} />}
           {page === 'activity' && <Changes hotelId={hotel} />}
           {page === 'transfers' && <TransferCards hotelId={hotel} />}
           {page === 'history' && <CountHistory hotel={hotel} />}
           {page === 'reports' && <Reports hotel={hotel} />}
-          {moreSet.includes(page) && page !== 'transfers' && page !== 'history' && page !== 'reports' && (
-            <>
-              <h1>More</h1>
-              <div className="tiles">
-                <button className="tile" onClick={() => setPage('transfers')}><span className="ic"><IconSend /></span><span className="t">Between hotels</span></button>
-                <button className="tile" onClick={() => setPage('history')}><span className="ic"><IconCount /></span><span className="t">Weekly counts</span></button>
-                <button className="tile" onClick={() => setPage('reports')}><span className="ic"><IconArrived /></span><span className="t">Reports</span></button>
-              </div>
-              <Settings />
-            </>
-          )}
+          {page === 'settings' && <Settings />}
         </main>
-        <nav className="bottomnav" aria-label="Main"><div>
-          {tabs.map(([k, l, Ico]) => <button key={k} aria-current={(k === 'settings' ? moreSet.includes(page) : page === k) ? 'page' : undefined} onClick={() => setPage(k)}><Ico />{l}</button>)}
-        </div></nav>
+        {page !== 'count' && <DockedAsk hotel={hotel} go={setPage} isOwner={isOwner} />}
       </div>
     );
   }
@@ -102,7 +91,16 @@ export const usePoll = () => useMe().me.config.ownerPollSeconds * 1000;
 const greeting = () => { const h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; };
 
 /** "What needs me today" first, then the stock picture, then each hotel. */
-export function Today({ hotel, go, isOwner }: { hotel: string; go: (p: Page) => void; isOwner: boolean }) {
+/** The ask bar docked at the bottom of phone screens (manager and owner). */
+export function DockedAsk({ hotel, go, isOwner }: { hotel: string; go: (p: Page) => void; isOwner: boolean }) {
+  const { me } = useMe();
+  return <VoiceAsk docked hotelId={hotel === 'all' ? me.hotels[0].id : hotel} scopeAll={hotel === 'all'} onGo={(a: VoiceGo) => {
+    const map: Record<VoiceGo, Page | null> = { SHOW_ALERTS: 'today', SHOW_TRANSFERS: 'transfers', SHOW_ROOM_USE: isOwner ? 'usage' : null, SHOW_CHANGES: 'activity', START_COUNT: isOwner ? 'history' : 'count' };
+    const p = map[a]; if (p) setTimeout(() => go(p), 700);
+  }} />;
+}
+
+export function Today({ hotel, go, isOwner, showAsk = true }: { hotel: string; go: (p: Page) => void; isOwner: boolean; showAsk?: boolean }) {
   const { me } = useMe();
   const poll = usePoll();
   const ov = useQuery<any>({ queryKey: ['overview', hotel, 30], queryFn: () => get(`/dashboard/overview?hotelId=${hotel}&periodDays=30`), refetchInterval: poll });
@@ -127,10 +125,10 @@ export function Today({ hotel, go, isOwner }: { hotel: string; go: (p: Page) => 
         <div><h1>{greeting()}, {me.displayName.split(' ')[0]}</h1><p>{items.length ? `${items.length} ${items.length === 1 ? 'thing needs' : 'things need'} your attention.` : 'Everything is in order.'}</p></div>
         <Freshness asOf={d?.asOf} isError={ov.isError} />
       </div>
-      <VoiceAsk hotelId={hotel === 'all' ? me.hotels[0].id : hotel} scopeAll={hotel === 'all'} onGo={(a: VoiceGo) => {
+      {showAsk && <VoiceAsk hotelId={hotel === 'all' ? me.hotels[0].id : hotel} scopeAll={hotel === 'all'} onGo={(a: VoiceGo) => {
         const map: Record<VoiceGo, Page | null> = { SHOW_ALERTS: null, SHOW_TRANSFERS: 'transfers', SHOW_ROOM_USE: isOwner ? 'usage' : null, SHOW_CHANGES: 'activity', START_COUNT: isOwner ? 'history' : 'count' };
         const p = map[a]; if (p) setTimeout(() => go(p), 900); else document.querySelector('.attention')?.scrollIntoView({ behavior: 'smooth' });
-      }} />
+      }} />}
 
       <section className="attention" aria-label="Needs attention">
         <div className="head"><h2>Needs attention</h2>{items.length > 0 && <span className="small muted">Most urgent first</span>}</div>

@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError, get, mutate } from '../api';
-import { downloadUrl, ErrorBanner, fmtTime, Loading, Modal, ProductIcon, StatusBadge } from '../ui/common';
+import { downloadUrl, ErrorBanner, fmtTime, Loading, Modal, ProductIcon, StatusBadge, useMe } from '../ui/common';
+import { speak, type Lang } from '../i18n';
+import { hasSpeechRecognition, listenContinuously, parseCountSpeech, type Listener } from '../ui/speech';
+import { Composer } from '../ui/Composer';
 
 const REASONS: [string, string][] = [['COUNTING_ERROR', 'Earlier counting error'], ['DAMAGED', 'Damaged'], ['UNRECORDED_ISSUE', 'Taken but not recorded'], ['RECEIPT_OVERSIGHT', 'Delivery not recorded'], ['EXPIRED', 'Expired'], ['OTHER', 'Other']];
 
@@ -39,6 +42,9 @@ function CountEntry({ id, onDone }: { id: string; onDone: () => void }) {
   const [local, setLocal] = useState<Record<string, { physicalQty: number | null; reason: string | null }>>({});
   const [saving, setSaving] = useState(false), [error, setError] = useState<unknown>(null), [confirm, setConfirm] = useState(false), [done, setDone] = useState<any>(null);
   const keyRef = useRef(crypto.randomUUID());
+  const localRef = useRef(local); localRef.current = local;
+  const [heardAt, setHeardAt] = useState<Record<string, number>>({});
+  const products = useQuery<any[]>({ queryKey: ['products'], queryFn: () => get('/products') });
   const qc = useQueryClient();
   useEffect(() => {
     if (!q.data) return;
@@ -61,6 +67,15 @@ function CountEntry({ id, onDone }: { id: string; onDone: () => void }) {
     setSaving(true);
     try { await api('PATCH', `/counts/${id}/lines`, { lines: [{ productId, physicalQty: merged.physicalQty, reason: merged.reason }] }); } catch (e) { setError(e); } finally { setSaving(false); }
   };
+  // Voice fills in the counted number; it never signs off. Each heard item is saved as a draft line.
+  const fromVoice = async (items: { productId: string; qty: number }[]) => {
+    const stamp = Date.now();
+    setLocal((cur) => { const next = { ...cur }; for (const it of items) next[it.productId] = { ...next[it.productId], physicalQty: it.qty }; return next; });
+    setHeardAt((h) => { const n = { ...h }; for (const it of items) n[it.productId] = stamp; return n; });
+    setSaving(true);
+    try { await api('PATCH', `/counts/${id}/lines`, { lines: items.map((it) => ({ productId: it.productId, physicalQty: it.qty, reason: localRef.current[it.productId]?.reason ?? null })) }); }
+    catch (e) { setError(e); } finally { setSaving(false); }
+  };
   const refresh = async () => { const r = await api('POST', `/counts/${id}/refresh`, {}); for (const p of r.refreshedProducts) setLocal((x) => ({ ...x, [p]: { physicalQty: null, reason: null } })); qc.invalidateQueries({ queryKey: ['count', id] }); setError(null); };
   const submit = async () => {
     setError(null);
@@ -77,12 +92,13 @@ function CountEntry({ id, onDone }: { id: string; onDone: () => void }) {
       <div className="small muted">Started {fmtTime(c.startedAt)} · {lines.length - uncounted}/{lines.length} counted {saving && '· saving…'}</div>
       {c.changedCount > 0 && <div className="banner warn row spread">{c.changedCount} item(s) changed since this count started. Refresh before finishing. <button className="btn" onClick={refresh}>Refresh changed items</button></div>}
       <ErrorBanner error={error} />
+      <VoiceCount lines={lines} aliases={products.data ?? []} onItems={fromVoice} />
       <div className="card table-wrap">
         <table className="count-table">
           <thead><tr><th>Product</th><th className="num">System</th><th className="num">Physical</th><th className="num">Difference</th><th>Reason</th><th className="num">Not counted: with staff / in transit</th></tr></thead>
           <tbody>{lines.map((l: any) => { const v = varianceOf(l); return (
-            <tr key={l.productId} style={l.changedSinceSnapshot ? { background: 'var(--warning-bg)' } : undefined}>
-              <td className="count-name"><span className="row"><ProductIcon sku={l.sku} icon={l.icon} />{l.name}</span>{l.changedSinceSnapshot && <div className="small" style={{ color: 'var(--warning)' }}>▲ changed — recount</div>}</td>
+            <tr key={l.productId} className={heardAt[l.productId] && Date.now() - heardAt[l.productId] < 4000 ? 'justheard' : undefined} style={l.changedSinceSnapshot ? { background: 'var(--warning-bg)' } : undefined}>
+              <td className="count-name"><span className="row"><ProductIcon sku={l.sku} icon={l.icon} />{l.name}{heardAt[l.productId] ? <span className="small muted" title="Filled by voice" aria-label="Filled by voice"> 🎙</span> : null}</span>{l.changedSinceSnapshot && <div className="small" style={{ color: 'var(--warning)' }}>▲ changed — recount</div>}</td>
               <td className="num" data-label="System">{l.expectedQty}</td>
               <td className="num" data-label="Physical"><input aria-label={`Physical ${l.name}`} inputMode="numeric" style={{ width: 90, textAlign: 'right' }} value={l.physicalQty ?? ''}
                 onChange={(e) => setLocal({ ...local, [l.productId]: { ...local[l.productId], physicalQty: e.target.value === '' ? null : Math.max(0, parseInt(e.target.value.replace(/\D/g, ''), 10) || 0) } })}
@@ -109,6 +125,70 @@ function CountEntry({ id, onDone }: { id: string; onDone: () => void }) {
           <button className="btn primary" onClick={submit}>Sign off</button>
         </Modal>
       )}
+    </>
+  );
+}
+
+type Heard = { id: number; ok: boolean; text: string };
+const LANG_LABEL: [Lang, string][] = [['en', 'EN'], ['hi', 'हि'], ['gu', 'ગુ']];
+function VoiceCount({ lines, aliases, onItems }: { lines: any[]; aliases: any[]; onItems: (items: { productId: string; qty: number }[]) => void }) {
+  const { me } = useMe();
+  const [lang, setLang] = useState<Lang>(me.language);
+  const [on, setOn] = useState(false);
+  const [interim, setInterim] = useState('');
+  const [log, setLog] = useState<Heard[]>([]);
+  const [problem, setProblem] = useState<string | null>(null);
+  const ear = useRef<Listener | null>(null);
+  const seq = useRef(0);
+  const onItemsRef = useRef(onItems); onItemsRef.current = onItems;
+  const catalog = lines.map((l) => ({ productId: l.productId, name: l.name, sku: l.sku, aliases: (aliases.find((p) => p.id === l.productId)?.aliases ?? []).map((a: any) => a.alias) }));
+  const catRef = useRef(catalog); catRef.current = catalog;
+  useEffect(() => () => ear.current?.abort(), []);
+  const add = (h: Omit<Heard, 'id'>) => setLog((x) => [{ ...h, id: ++seq.current }, ...x].slice(0, 6));
+  const phrase = (text: string, spoken = true) => {
+    const r = parseCountSpeech(text, catRef.current);
+    if (r.items.length) {
+      onItemsRef.current(r.items);
+      r.items.forEach((it) => add({ ok: true, text: `${it.name} → ${it.qty}` }));
+      if (spoken) speak(r.items.map((it) => `${it.name} ${it.qty}`).join(', '), lang);
+    }
+    r.productsWithoutNumber.forEach((n) => add({ ok: false, text: `${n}: say the number too` }));
+    if (!r.items.length && !r.productsWithoutNumber.length && text) add({ ok: false, text: `“${text}” — not understood` });
+  };
+  const startedAt = useRef(0);
+  const start = () => {
+    setProblem(null); setInterim(''); startedAt.current = Date.now();
+    ear.current = listenContinuously(lang, {
+      onPhrase: (t) => phrase(t), onInterim: setInterim,
+      onStop: (err) => { setOn(false); setInterim(''); ear.current = null; if (err) setProblem('The microphone is blocked. Allow it in the browser and try again, or type the numbers below.'); },
+    });
+    setOn(!!ear.current);
+    if (!ear.current) setProblem('Voice counting isn’t available in this browser. Use Chrome, or type the numbers below.');
+  };
+  const stop = () => { ear.current?.stop(); setOn(false); };
+  const supported = hasSpeechRecognition();
+  const left = lines.filter((l) => l.physicalQty == null).map((l) => l.name);
+  return (
+    <>
+      <section className="card stack" style={{ gap: 8 }}>
+        <div className="row spread" style={{ alignItems: 'center' }}>
+          <b>Count by voice or typing</b>
+          <div className="seg" role="group" aria-label="Voice language" style={{ width: 'auto', display: 'inline-flex' }}>
+            {LANG_LABEL.map(([l, label]) => <button key={l} aria-pressed={lang === l} disabled={on} onClick={() => setLang(l)}>{label}</button>)}
+          </div>
+        </div>
+        <div className="small muted">Hold the mic at the bottom and say items and numbers, like “Soap 180, shampoo 110”, or type them. Numbers fill in below; you still check and submit.</div>
+        {left.length > 0 && left.length < lines.length && <div className="small"><b>Still to count:</b> {left.join(', ')}</div>}
+        {left.length === 0 && <div className="small" style={{ color: 'var(--mint)', fontWeight: 700 }}>✓ Everything counted. Check the differences below, then submit.</div>}
+      </section>
+      <Composer docked placeholder="Type: soap 180, shampoo 110"
+        labels={{ hold: 'Hold to count by voice', slide: '◀ Slide to cancel', releaseCancel: 'Release to cancel', send: 'Fill in' }}
+        feed={(log.length > 0 || problem) ? <div className="chips-feed">{problem && <span className="miss">{problem}</span>}{log.slice(0, 3).map((h) => <span key={h.id} className={h.ok ? 'ok' : 'miss'}>{h.ok ? '✓' : '?'} {h.text}</span>)}</div> : undefined}
+        onText={(text) => phrase(text, false)}
+        voice={{ available: supported, live: on, startedAt: startedAt.current, interim,
+          onStart: start, onSend: stop, onCancel: () => { ear.current?.abort(); ear.current = null; setOn(false); setInterim(''); },
+          onTap: () => setProblem('Keep holding the mic while you speak, then let go.'),
+          onUnavailable: () => setProblem('Voice counting works in Chrome. Type the numbers instead.') }} />
     </>
   );
 }

@@ -119,6 +119,14 @@ describe('Gemini adapter (HTTP contract, mocked fetch — no live call)', () => 
     expect(r.inputTokens).toBe(900);
   });
 
+  it('typed text is sent to Gemini as text, not as audio', async () => {
+    let body: any;
+    const p = new GeminiProvider(cfg, (async (_u: string, init: any) => { body = JSON.parse(init.body); return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: '{}' }] } }] }), { status: 200 }); }) as any);
+    await p.extract(Buffer.from('room 203 two soap'), 'text/plain', ctx).catch(() => {});
+    expect(body.contents[0].parts[1].inlineData).toBeUndefined();
+    expect(body.contents[0].parts[1].text).toContain('room 203 two soap');
+  });
+
   it('retries once on 5xx then reports TEMPORARY_UNAVAILABLE', async () => {
     let calls = 0;
     const p = new GeminiProvider(cfg, (async () => { calls++; return new Response('x', { status: 503 }); }) as any);

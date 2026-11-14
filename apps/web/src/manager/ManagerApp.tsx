@@ -3,14 +3,14 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { get } from '../api';
 import { ACTION_LABEL, ErrorBanner, fmtTime, Loading, StatusBadge, useMe } from '../ui/common';
-import { IconCount, IconHome, IconList, IconSend, IconSettings, IconStore } from '../ui/icons';
-import { ResolveModal, ReverseModal, Today, usePoll, type Page } from '../owner/AdminApp';
+import { IconClock, IconCount, IconHome, IconList, IconSend, IconSettings, IconStore } from '../ui/icons';
+import { BurgerMenu } from '../ui/Menu';
+import { DockedAsk, ResolveModal, ReverseModal, Today, usePoll, type Page } from '../owner/AdminApp';
 import { CountHistory, WeeklyCount } from './Count';
 import { Settings } from '../owner/Settings';
 import { emojiFor } from '../staff/Flow';
 
-type Tab = 'today' | 'count' | 'stock' | 'changes' | 'more';
-type More = 'menu' | 'transfers' | 'history' | 'settings';
+type Tab = 'today' | 'count' | 'stock' | 'changes' | 'transfers' | 'history' | 'settings';
 
 export function ManagerApp() {
   const { me, logout } = useMe();
@@ -18,49 +18,34 @@ export function ManagerApp() {
   const [hotelId, setHotelId] = useState(hotels[0]?.id);
   const hotel = hotels.find((h) => h.id === hotelId)!;
   const [tab, setTab] = useState<Tab>('today');
-  const [more, setMore] = useState<More>('menu');
   const go = (p: Page) => {
     if (p === 'count') setTab('count'); else if (p === 'stock') setTab('stock'); else if (p === 'activity') setTab('changes');
-    else if (p === 'transfers') { setTab('more'); setMore('transfers'); } else if (p === 'history') { setTab('more'); setMore('history'); }
+    else if (p === 'transfers') setTab('transfers'); else if (p === 'history') setTab('history'); else if (p === 'today') setTab('today');
   };
-  const nav: [Tab, () => JSX.Element, string][] = [['today', IconHome, 'Today'], ['count', IconCount, 'Count'], ['stock', IconStore, 'Stock'], ['changes', IconList, 'Changes'], ['more', IconSettings, 'More']];
+  const nav: [Tab, string, () => JSX.Element][] = [['today', 'Today', IconHome], ['count', 'Weekly count', IconCount], ['stock', 'Stock', IconStore], ['changes', 'Changes', IconList],
+    ['transfers', 'Between hotels', IconSend], ['history', 'Past counts', IconClock], ['settings', 'Settings', IconSettings]];
   return (
-    <div className="app mshell">
+    <div className="app mshell nobottom">
       <header className="topbar">
-        <div className="who">
+        <BurgerMenu who={<><b>{me.displayName}</b><div className="small">Manager</div></>}
+          items={nav.map(([k, label, Icon]) => ({ key: k, label, Icon, current: tab === k, onClick: () => setTab(k) }))} onSignOut={logout} />
+        <div className="who" style={{ flex: 1, minWidth: 0 }}>
           {hotels.length > 1
             ? <select aria-label="Hotel" value={hotelId} onChange={(e) => setHotelId(e.target.value)} style={{ fontWeight: 700 }}>{hotels.map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}</select>
             : <b>{hotel.name}</b>}
-          <div className="small muted">{me.displayName} · Manager</div>
+          <div className="small muted">{nav.find((n) => n[0] === tab)?.[1]}</div>
         </div>
-        <button className="link" onClick={logout}>Sign out</button>
       </header>
       <main className="content">
-        {tab === 'today' && <Today hotel={hotelId} go={go} isOwner={false} />}
+        {tab === 'today' && <Today hotel={hotelId} go={go} isOwner={false} showAsk={false} />}
         {tab === 'count' && <WeeklyCount hotelId={hotelId} />}
         {tab === 'stock' && <StockCards hotelId={hotelId} />}
         {tab === 'changes' && <Changes hotelId={hotelId} tz={hotel.timezone} />}
-        {tab === 'more' && (more === 'menu' ? (
-          <>
-            <h1>More</h1>
-            <div className="tiles">
-              <button className="tile" onClick={() => setMore('transfers')}><span className="ic"><IconSend /></span><span className="t">Between hotels</span></button>
-              <button className="tile" onClick={() => setMore('history')}><span className="ic"><IconCount /></span><span className="t">Past counts</span></button>
-              <button className="tile" onClick={() => setMore('settings')}><span className="ic"><IconSettings /></span><span><span className="t" style={{ display: 'block' }}>Settings</span><span className="s">Phones, staff, rooms, stock levels</span></span></button>
-            </div>
-          </>
-        ) : (
-          <>
-            <button className="link" style={{ alignSelf: 'flex-start', padding: 0 }} onClick={() => setMore('menu')}>‹ More</button>
-            {more === 'transfers' && <TransferCards hotelId={hotelId} />}
-            {more === 'history' && <CountHistory hotel={hotelId} />}
-            {more === 'settings' && <Settings />}
-          </>
-        ))}
+        {tab === 'transfers' && <TransferCards hotelId={hotelId} />}
+        {tab === 'history' && <CountHistory hotel={hotelId} />}
+        {tab === 'settings' && <Settings />}
       </main>
-      <nav className="bottomnav" aria-label="Main"><div>
-        {nav.map(([k, Ico, label]) => <button key={k} aria-current={tab === k ? 'page' : undefined} onClick={() => { setTab(k); if (k === 'more') setMore('menu'); }}><Ico />{label}</button>)}
-      </div></nav>
+      {tab !== 'count' && <DockedAsk hotel={hotelId} go={go} isOwner={false} />}
     </div>
   );
 }

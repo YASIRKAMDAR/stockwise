@@ -48,7 +48,8 @@ export async function interpret(db: Db, cfg: Config, provider: VoiceProvider | n
   if (!provider) throw err('VOICE_DISABLED', 'Voice entry is turned off. Please enter it manually.');
   const hotel = await requireHotel(db, actor, input.hotelId);
   const mime = input.mimeType.split(';')[0].trim().toLowerCase();
-  const textFixture = provider.name === 'fake' && mime === 'text/plain';
+  // Typed text from the app's text box is accepted from every provider (and used by tests with the fake one).
+  const textFixture = mime === 'text/plain';
   if (!ALLOWED_AUDIO.has(mime) && !textFixture) throw err('UNSUPPORTED_AUDIO', 'Unsupported recording format');
   if (input.audio.length === 0) throw err('UNSUPPORTED_AUDIO', 'Empty recording');
   if (input.audio.length > cfg.VOICE_MAX_BYTES) throw err('UNSUPPORTED_AUDIO', `Recording too large. Keep it under ${cfg.VOICE_MAX_SECONDS} seconds or split it.`);

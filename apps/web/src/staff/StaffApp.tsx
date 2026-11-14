@@ -5,6 +5,8 @@ import { DICTS, LANG_CODES, LANG_NAMES, speak, type FlowKind, type Lang, type T 
 import { ACTION_LABEL, ErrorBanner, fmtTime, Loading, StatusBadge, Stepper, useMe } from '../ui/common';
 import { IconArrived, IconBag, IconClock, IconHome, IconMic, IconReceive, IconRepeat, IconReturn, IconRoom, IconSend, IconStop, IconTake } from '../ui/icons';
 import { hasSpeechRecognition, recognize, type Listener } from '../ui/speech';
+import { Composer } from '../ui/Composer';
+import { BurgerMenu } from '../ui/Menu';
 import { emojiFor, Flow, loadLast, nativeName, type FlowState, type Product } from './Flow';
 
 type Tab = 'home' | 'bag' | 'transfers' | 'history';
@@ -24,16 +26,17 @@ export function StaffApp() {
 
   const nav: [Tab, () => JSX.Element, string][] = [['home', IconHome, t.home], ['bag', IconBag, t.myStock], ['transfers', IconSend, t.transfers], ['history', IconClock, t.activity]];
   return (
-    <div className="app" lang={lang}>
+    <div className="app nobottom" lang={lang}>
       <header className="topbar">
-        <div className="who"><b>{hotel.name}</b><div className="small muted">{me.displayName}</div></div>
-        <div className="row" style={{ flexWrap: 'nowrap' }}>
-          <label className="sr-only" htmlFor="lang">{t.language}</label>
-          <select id="lang" value={lang} onChange={(e) => changeLang(e.target.value as Lang)}>
-            {(Object.keys(LANG_NAMES) as Lang[]).map((l) => <option key={l} value={l}>{LANG_NAMES[l]}</option>)}
-          </select>
-          <button className="link" onClick={logout}>{t.signOut}</button>
-        </div>
+        <BurgerMenu
+          who={<><b>{me.displayName}</b><div className="small">{hotel.name}</div></>}
+          items={nav.map(([k, Icon, label]) => ({ key: k, label, Icon, current: tab === k && !flow, onClick: () => { setFlow(null); setTab(k); } }))}
+          extra={<label className="small muted">{t.language}
+            <select id="lang" value={lang} onChange={(e) => changeLang(e.target.value as Lang)} style={{ marginTop: 4 }}>
+              {(Object.keys(LANG_NAMES) as Lang[]).map((l) => <option key={l} value={l}>{LANG_NAMES[l]}</option>)}
+            </select></label>}
+          onSignOut={logout} signOutLabel={t.signOut} />
+        <div className="who" style={{ flex: 1 }}><b>{flow ? t.act[flow.kind]?.[0] ?? hotel.name : tab === 'home' ? hotel.name : nav.find((n) => n[0] === tab)?.[2]}</b><div className="small muted">{me.displayName} · {hotel.name}</div></div>
       </header>
       <main className="content">
         {flow ? <Flow key={flow.kind + flow.step + (flow.proposalId ?? '')} init={flow} hotelId={hotelId} lang={lang} t={t} onExit={() => setFlow(null)} />
@@ -42,11 +45,6 @@ export function StaffApp() {
           : tab === 'transfers' ? <Transfers t={t} hotelId={hotelId} start={start} />
           : <History t={t} hotelId={hotelId} tz={hotel.timezone} />}
       </main>
-      <nav className="bottomnav" aria-label="Main"><div>
-        {nav.map(([k, Ico, label]) => (
-          <button key={k} aria-current={tab === k && !flow ? 'page' : undefined} onClick={() => { setFlow(null); setTab(k); }}><Ico />{label}</button>
-        ))}
-      </div></nav>
     </div>
   );
 }
@@ -62,7 +60,7 @@ function Home({ t, lang, hotelId, start, openReceive }: { t: T; lang: Lang; hote
     <>
       <Drafts t={t} />
       <Voice t={t} lang={lang} hotelId={hotelId} start={start} openReceive={openReceive} />
-      <p className="small muted" style={{ textAlign: 'center', margin: '4px 0 -4px' }}>{t.orTap}</p>
+      <p className="small muted" style={{ margin: '4px 0 -6px' }}>{t.orTap}</p>
       <div className="tiles">
         <button className="tile primary-tile" onClick={() => start('PLACE_IN_ROOM')}>
           <span className="ic"><IconRoom /></span>
@@ -93,7 +91,6 @@ type RecState = 'idle' | 'asking' | 'recording' | 'uploading';
 function Voice({ t, lang, hotelId, start, openReceive }: { t: T; lang: Lang; hotelId: string; start: (k: FlowKind, extra?: Partial<FlowState>) => void; openReceive: () => void }) {
   const { me } = useMe();
   const [state, setState] = useState<RecState>('idle');
-  const [secs, setSecs] = useState(0);
   const [msg, setMsg] = useState<{ tone: 'warn' | 'bad'; text: string } | null>(null);
   const [query, setQuery] = useState<any>(null);
   const [fakeText, setFakeText] = useState('');
@@ -101,18 +98,23 @@ function Voice({ t, lang, hotelId, start, openReceive }: { t: T; lang: Lang; hot
   const [nudge, setNudge] = useState(false);
   const fails = useRef(0);
   const ear = useRef<Listener | null>(null);
+  const rec = useRef<MediaRecorder | null>(null);
+  const want = useRef<'idle' | 'hold' | 'send' | 'cancel'>('idle');
+  const started = useRef(0);
+  const max = me.config.voiceMaxSeconds;
   const tapInstead = () => { ear.current?.abort(); start('PLACE_IN_ROOM'); };
   const failed = (text: string) => {
     fails.current += 1; setNudge(true);
     if (fails.current >= 2) { fails.current = 0; speak(t.twiceFailed, lang); tapInstead(); return; }
     setMsg({ tone: 'warn', text }); speak(text, lang);
   };
-  const rec = useRef<MediaRecorder | null>(null);
-  const timer = useRef<number | null>(null);
-  const started = useRef(0);
-  const max = me.config.voiceMaxSeconds;
-  useEffect(() => () => { if (timer.current) clearInterval(timer.current); rec.current?.stream.getTracks().forEach((x) => x.stop()); ear.current?.abort(); }, []);
-  if (me.config.voiceProvider === 'disabled') return null;
+  useEffect(() => () => { rec.current?.stream.getTracks().forEach((x) => x.stop()); ear.current?.abort(); }, []);
+  // Hard stop at the configured maximum length.
+  useEffect(() => {
+    if (state !== 'recording') return;
+    const id = window.setTimeout(() => finish('send'), max * 1000);
+    return () => clearTimeout(id);
+  }, [state]);
 
   const handle = (p: any) => {
     setQuery(null); setMsg(null);
@@ -142,78 +144,79 @@ function Voice({ t, lang, hotelId, start, openReceive }: { t: T; lang: Lang; hot
     catch (e) { setMsg({ tone: 'bad', text: e instanceof ApiError && e.status >= 500 ? t.voiceFailed : errorText(e) }); }
     finally { setState('idle'); }
   };
-  // No audio model configured: let the phone's own speech recognition turn speech into text.
+
+  // With no audio model configured, the phone's own speech recognition turns speech into text.
   const useBrowserEar = me.config.voiceProvider === 'fake' && hasSpeechRecognition();
-  const beginBrowser = () => {
-    setHeard(''); setState('recording'); started.current = Date.now(); setSecs(0);
-    timer.current = window.setInterval(() => setSecs(Math.floor((Date.now() - started.current) / 1000)), 250);
-    ear.current = recognize(lang, {
-      onInterim: setHeard,
-      onEnd: (text, err) => {
-        ear.current = null; if (timer.current) clearInterval(timer.current);
-        if (err === 'not-allowed' || err === 'service-not-allowed') { setState('idle'); setNudge(true); setMsg({ tone: 'warn', text: t.micDenied }); return; }
-        if (!text) { setState('idle'); if (err && err !== 'aborted') failed(t.voiceFailed); return; }
-        send(new Blob([text], { type: 'text/plain' }), Date.now() - started.current, 'speech.txt');
-      },
-    });
-    if (!ear.current) { setState('idle'); setNudge(true); setMsg({ tone: 'warn', text: t.voiceUnavailable }); }
-  };
-  const begin = async () => {
-    setMsg(null); setQuery(null); setHeard('');
-    if (useBrowserEar) return beginBrowser();
-    if (me.config.voiceProvider === 'fake') { setNudge(true); setMsg({ tone: 'warn', text: t.voiceUnavailable }); return; }
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') { setMsg({ tone: 'warn', text: t.micDenied }); return; }
+  const onStart = async () => {
+    setMsg(null); setQuery(null); setHeard(''); want.current = 'hold';
+    if (useBrowserEar) {
+      started.current = Date.now(); setState('recording');
+      ear.current = recognize(lang, {
+        continuous: true, onInterim: setHeard,
+        onEnd: (text, err) => {
+          ear.current = null;
+          if (err === 'not-allowed' || err === 'service-not-allowed') { setState('idle'); setNudge(true); setMsg({ tone: 'warn', text: t.micDenied }); return; }
+          if (want.current === 'cancel') { setState('idle'); return; }
+          if (!text) { setState('idle'); failed(t.voiceFailed); return; }
+          send(new Blob([text], { type: 'text/plain' }), Date.now() - started.current, 'speech.txt');
+        },
+      });
+      if (!ear.current) { setState('idle'); setNudge(true); setMsg({ tone: 'warn', text: t.voiceUnavailable }); }
+      return;
+    }
+    if (me.config.voiceProvider === 'fake' || !navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') { setNudge(true); setMsg({ tone: 'warn', text: t.voiceUnavailable }); return; }
     setState('asking');
     let stream: MediaStream;
-    try { stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, noiseSuppression: true } }); } catch { setState('idle'); setMsg({ tone: 'warn', text: t.micDenied }); return; }
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, noiseSuppression: true } }); }
+    catch { setState('idle'); setNudge(true); setMsg({ tone: 'warn', text: t.micDenied }); return; }
+    // Released while the browser was asking for the microphone: don't record; ask them to hold again.
+    if (want.current !== 'hold') { stream.getTracks().forEach((x) => x.stop()); setState('idle'); setMsg({ tone: 'warn', text: t.holdHint }); return; }
     const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg'].find((m) => MediaRecorder.isTypeSupported(m));
     const r = new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 32000 } : undefined);
     const chunks: Blob[] = [];
     r.ondataavailable = (e) => e.data.size && chunks.push(e.data);
     r.onstop = () => {
       stream.getTracks().forEach((x) => x.stop());
-      if (timer.current) clearInterval(timer.current);
       const dur = Date.now() - started.current;
-      if (dur < 600) { setState('idle'); return; }
+      if (want.current === 'cancel' || dur < 600) { setState('idle'); return; }
       send(new Blob(chunks, { type: (r.mimeType || 'audio/webm').split(';')[0] }), dur);
     };
-    rec.current = r; started.current = Date.now(); setSecs(0);
+    rec.current = r; started.current = Date.now();
     r.start(); setState('recording');
-    timer.current = window.setInterval(() => {
-      const s = Math.floor((Date.now() - started.current) / 1000);
-      setSecs(s);
-      if (s >= max && r.state === 'recording') r.stop();
-    }, 250);
   };
-  const stop = () => { if (ear.current) { ear.current.stop(); return; } if (rec.current?.state === 'recording') rec.current.stop(); };
+  const finish = (how: 'send' | 'cancel') => {
+    want.current = how;
+    if (ear.current) { how === 'send' ? ear.current.stop() : (ear.current.abort(), setState('idle')); }
+    if (rec.current?.state === 'recording') rec.current.stop();
+  };
+  const live = state === 'recording' || state === 'asking';
+  const disabled = me.config.voiceProvider === 'disabled';
+  const canVoice = !disabled && (useBrowserEar || (me.config.voiceProvider !== 'fake' && !!navigator.mediaDevices?.getUserMedia));
+  const typed = (text: string) => { setMsg(null); setQuery(null); send(new Blob([text], { type: 'text/plain' }), 0, 'typed.txt'); };
 
   return (
-    <section className="mic-wrap" aria-live="polite">
-      <button className={`mic${state === 'recording' ? ' rec' : ''}`} onClick={state === 'recording' ? stop : begin} disabled={state === 'uploading' || state === 'asking'}
-        aria-label={state === 'recording' ? 'Stop recording' : 'Start recording'}>
-        {state === 'recording' ? <IconStop /> : <IconMic />}
-      </button>
-      <div className="mic-label">{state === 'recording' ? `${t.listening} ${secs}s` : state === 'uploading' ? t.understanding : t.tapToSpeak}</div>
-      {heard && state !== 'idle' && <div className="heard">“{heard}”</div>}
-      {state === 'idle' && !msg && <div className="small faint" style={{ textAlign: 'center' }}>{t.examples[0]}</div>}
-      {msg && <div className={`banner ${msg.tone}`} role="alert" style={{ width: '100%' }}>{msg.text}</div>}
-      {state !== 'recording' && <button className={`btn lg block tapinstead${nudge ? ' hi' : ''}`} onClick={tapInstead}>{t.tapInstead}</button>}
+    <>
+      <section className="voice-intro">
+        <span className="dot" aria-hidden="true"><IconMic /></span>
+        <div><b style={{ fontSize: '1.08rem' }}>{t.holdToTalk}</b><div className="small muted">{t.examples[0]}</div></div>
+      </section>
+      {msg && <div className={`banner ${msg.tone}`} role="alert">{msg.text}</div>}
       {query && (
-        <div className="panel" style={{ width: '100%' }}>
+        <div className="panel">
           <table><thead><tr><th>{' '}</th><th className="num">Store</th><th className="num">Staff</th></tr></thead>
             <tbody>{(query.queryResult ?? []).map((r: any) => <tr key={r.productId}><td>{r.name}</td><td className="num">{r.store}</td><td className="num">{r.staffHeld}</td></tr>)}</tbody></table>
         </div>
       )}
-      {me.config.voiceProvider === 'fake' && (
-        <details className="small" style={{ width: '100%' }}>
-          <summary className="faint">Test mode: type instead of speaking</summary>
-          <div className="row" style={{ marginTop: 8, flexWrap: 'nowrap' }}>
-            <input value={fakeText} onChange={(e) => setFakeText(e.target.value)} placeholder="Room 101 mein 2 soap rakhe" />
-            <button className="btn" onClick={() => send(new Blob([fakeText], { type: 'text/plain' }), 0, 'fixture.txt')}>Send</button>
-          </div>
-        </details>
+      <button className={`btn lg block tapinstead${nudge ? ' hi' : ''}`} onClick={tapInstead}>{t.tapInstead}</button>
+      {!disabled && (
+        <Composer docked placeholder={t.typeHere}
+          labels={{ hold: t.holdToTalk, slide: t.slideToCancel, releaseCancel: t.releaseToCancel, send: t.send }}
+          onText={typed}
+          voice={{ available: canVoice, live, startedAt: started.current, interim: heard, busy: state === 'uploading',
+            onStart, onSend: () => finish('send'), onCancel: () => finish('cancel'),
+            onTap: () => setMsg({ tone: 'warn', text: t.holdHint }), onUnavailable: () => { setNudge(true); setMsg({ tone: 'warn', text: t.voiceUnavailable }); } }} />
       )}
-    </section>
+    </>
   );
 }
 

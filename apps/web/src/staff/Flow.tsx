@@ -3,8 +3,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, errorText, get, loadDrafts, mutate, newKey, NetworkError, saveDrafts } from '../api';
 import { speak, type FlowKind, type Lang, type T } from '../i18n';
 import { Modal, Stepper, useMe } from '../ui/common';
-import { IconBack, IconCheck, IconSpeaker } from '../ui/icons';
-import { afterSpeech, chime, hasSpeechRecognition, recognize, yesNo, type Listener } from '../ui/speech';
+import { IconBack, IconCheck, IconMic, IconSpeaker } from '../ui/icons';
+import { useHold } from '../ui/hold';
+import { chime, hasSpeechRecognition, recognize, yesNo, type Listener } from '../ui/speech';
 
 export interface Product { id: string; sku: string; name: string; unit: string; icon: string | null; active: boolean; aliases: { locale: string; alias: string }[] }
 export interface Room { id: string; roomNumber: string; active: boolean }
@@ -214,7 +215,7 @@ export function Flow({ init, hotelId, lang, t, onExit }: { init: FlowState; hote
     } finally { setBusy(false); }
   };
 
-  // Voice-first: read the check screen aloud, then listen once for a spoken yes / no.
+  // Voice-first: read the check screen aloud once. Staff then hold the mic and say yes / no (or tap).
   const fromVoice = !!s.proposalId;
   const asked = useRef(false);
   const ear = useRef<Listener | null>(null);
@@ -222,24 +223,26 @@ export function Flow({ init, hotelId, lang, t, onExit }: { init: FlowState; hote
   const confirmRef = useRef(confirm); confirmRef.current = confirm;
   useEffect(() => {
     if (s.step !== 'review' || !fromVoice || blocked || asked.current || data.loading) return;
-    asked.current = true;
-    let live = true;
-    listen();
-    if (!hasSpeechRecognition()) return;
-    afterSpeech().then(() => {
-      if (!live) return;
-      setHearing(true);
-      ear.current = recognize(lang, { onEnd: (text) => {
+    asked.current = true; listen();
+  }, [s.step, fromVoice, blocked, data.loading]);
+  useEffect(() => () => ear.current?.abort(), []);
+  const stopHearing = () => { ear.current?.abort(); ear.current = null; setHearing(false); };
+  const yn = useRef<'send' | 'cancel'>('send');
+  const holdYes = useHold({
+    onStart: () => {
+      try { speechSynthesis.cancel(); } catch { /* none */ }
+      yn.current = 'send'; setHearing(true);
+      ear.current = recognize(lang, { continuous: true, onEnd: (text) => {
         setHearing(false); ear.current = null;
-        if (!live) return;
+        if (yn.current === 'cancel') return;
         const a = yesNo(text);
         if (a === 'yes') confirmRef.current(); else if (a === 'no') onExit();
       } });
       if (!ear.current) setHearing(false);
-    });
-    return () => { live = false; ear.current?.abort(); };
-  }, [s.step, fromVoice, blocked, data.loading]);
-  const stopHearing = () => { ear.current?.abort(); ear.current = null; setHearing(false); };
+    },
+    onSend: () => { yn.current = 'send'; ear.current?.stop(); },
+    onCancel: () => { yn.current = 'cancel'; stopHearing(); },
+  });
 
   // Done: chime, and after a voice entry go back to the mic on its own.
   useEffect(() => {
@@ -366,9 +369,10 @@ export function Flow({ init, hotelId, lang, t, onExit }: { init: FlowState; hote
       <div style={{ height: 8 }} />
       <div className="actionbar"><div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>
-        {fromVoice && !blocked && <p className={`small ${hearing ? '' : 'muted'}`} style={{ textAlign: 'center', margin: '0 0 6px' }}>{hearing ? <><span className="recdot" /> {t.hearingYesNo}</> : hasSpeechRecognition() ? t.sayYesNo : null}</p>}
+        {fromVoice && !blocked && hasSpeechRecognition() && <p className={`small ${hearing ? '' : 'muted'}`} style={{ textAlign: 'center', margin: '0 0 6px' }}>{hearing ? <><span className="recdot" /> {t.hearingYesNo}</> : t.holdYesNo}</p>}
         <div className="row" style={{ flexWrap: 'nowrap', gap: 10 }}>
-          {fromVoice && <button className="btn lg" style={{ flex: '0 0 30%' }} aria-label={t.cancel} onClick={() => { stopHearing(); onExit(); }}>✕</button>}
+          {fromVoice && !blocked && hasSpeechRecognition() && <button type="button" {...holdYes.handlers} className={`holdmic${hearing ? ' rec' : ''}`} aria-label={t.holdYesNo}><IconMic /></button>}
+          {fromVoice && <button className="btn lg" style={{ flex: '0 0 22%' }} aria-label={t.cancel} onClick={() => { stopHearing(); onExit(); }}>✕</button>}
           <button className="btn go lg block" disabled={busy || blocked} onClick={() => { stopHearing(); confirm(); }}><IconCheck /> {busy ? '…' : t.confirm}</button>
         </div>
         </div>

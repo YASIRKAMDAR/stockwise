@@ -2,6 +2,8 @@ export type Lang = 'en' | 'hi' | 'gu';
 export type FlowKind = 'PLACE_IN_ROOM' | 'CHECKOUT_TO_STAFF' | 'RETURN_TO_STORE' | 'SUPPLIER_RECEIPT' | 'TRANSFER_DISPATCH';
 
 const en = {
+  typeHere: 'Type: room 203, 2 soap', send: 'Send', 
+  holdToTalk: 'Hold the mic and say what you did', releaseToSend: 'Release to send', slideToCancel: '◀ Slide to cancel', releaseToCancel: 'Release to cancel', holdHint: 'Keep holding the mic while you speak, then let go.', holdYesNo: 'Hold and say “yes” / “no”', cancelled: 'Cancelled',
   tapInstead: '✋ Tap instead', sayYesNo: 'or say “yes” / “no”', hearingYesNo: 'Listening for yes / no…', backHome: 'Back to start in a moment', twiceFailed: 'Didn’t catch that twice — let’s tap instead.', voiceUnavailable: 'Voice isn’t available on this phone. Tap instead.',
   home: 'Home', myStock: 'My bag', transfers: 'Transfers', activity: 'History',
   tapToSpeak: 'Tap and say what you did', listening: 'Listening… tap to stop', understanding: 'Understanding…',
@@ -48,6 +50,8 @@ type Dict = typeof en;
 
 const gu: Dict = {
   ...en,
+  typeHere: 'લખો: રૂમ 203, 2 સાબુ', send: 'મોકલો', 
+  holdToTalk: 'માઇક દબાવી રાખો અને બોલો', releaseToSend: 'મોકલવા છોડો', slideToCancel: '◀ રદ કરવા ડાબે ખસેડો', releaseToCancel: 'રદ કરવા છોડો', holdHint: 'બોલો ત્યાં સુધી માઇક દબાવી રાખો, પછી છોડો.', holdYesNo: 'દબાવી રાખો અને બોલો “હા” / “ના”', cancelled: 'રદ થયું',
   tapInstead: '✋ દબાવીને કરો', sayYesNo: 'અથવા બોલો “હા” / “ના”', hearingYesNo: 'હા / ના સાંભળીએ છીએ…', backHome: 'થોડી વારમાં શરૂઆતમાં', twiceFailed: 'બે વાર સમજાયું નહીં — દબાવીને કરીએ.', voiceUnavailable: 'આ ફોનમાં અવાજ ચાલતો નથી. દબાવીને કરો.',
   home: 'હોમ', myStock: 'મારી બેગ', transfers: 'ટ્રાન્સફર', activity: 'ઇતિહાસ',
   tapToSpeak: 'ટૅપ કરીને બોલો તમે શું કર્યું', listening: 'સાંભળી રહ્યા છીએ… રોકવા ટૅપ કરો', understanding: 'સમજી રહ્યા છીએ…',
@@ -93,6 +97,8 @@ const gu: Dict = {
 
 const hi: Dict = {
   ...en,
+  typeHere: 'लिखें: रूम 203, 2 साबुन', send: 'भेजें', 
+  holdToTalk: 'माइक दबाकर रखें और बोलें', releaseToSend: 'भेजने के लिए छोड़ें', slideToCancel: '◀ रद्द करने के लिए बाएँ खिसकाएँ', releaseToCancel: 'रद्द करने के लिए छोड़ें', holdHint: 'बोलते समय माइक दबाकर रखें, फिर छोड़ें।', holdYesNo: 'दबाकर रखें और बोलें “हाँ” / “नहीं”', cancelled: 'रद्द हुआ',
   tapInstead: '✋ दबाकर करें', sayYesNo: 'या बोलें “हाँ” / “नहीं”', hearingYesNo: 'हाँ / नहीं सुन रहे हैं…', backHome: 'थोड़ी देर में शुरुआत पर', twiceFailed: 'दो बार समझ नहीं आया — दबाकर करते हैं।', voiceUnavailable: 'इस फ़ोन पर आवाज़ नहीं चलती। दबाकर करें।',
   home: 'होम', myStock: 'मेरा बैग', transfers: 'ट्रांसफर', activity: 'इतिहास',
   tapToSpeak: 'टैप करके बताएं आपने क्या किया', listening: 'सुन रहे हैं… रोकने के लिए टैप करें', understanding: 'समझ रहे हैं…',
