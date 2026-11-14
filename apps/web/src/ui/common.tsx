@@ -25,17 +25,17 @@ export function Stepper({ value, onChange, min = 0, label }: { value: number | n
 }
 
 const STATUS: Record<string, [string, string, string]> = {
-  IN_TRANSIT: ['warn', '⏳', 'In transit'], PARTIALLY_RECEIVED: ['warn', '◐', 'Partially received'], RECEIVED: ['ok', '✓', 'Received'],
-  DISCREPANCY: ['bad', '!', 'Discrepancy'], RESOLVED: ['neutral', '✓', 'Resolved'], COMPLETED: ['ok', '✓', 'Completed'], DUE: ['warn', '⏳', 'Due this week'],
-  OVERDUE: ['bad', '!', 'Overdue'], DRAFT: ['warn', '✎', 'In progress'], SUBMITTED: ['ok', '✓', 'Signed off'], CANCELLED: ['neutral', '×', 'Cancelled'],
-  HIGH: ['bad', '!', 'High'], MEDIUM: ['warn', '▲', 'Medium'], LOW: ['neutral', '•', 'Low'],
+  IN_TRANSIT: ['warn', '⏳', 'On the way'], PARTIALLY_RECEIVED: ['warn', '◐', 'Part arrived'], RECEIVED: ['ok', '✓', 'Arrived'],
+  DISCREPANCY: ['bad', '!', 'Short — check'], RESOLVED: ['neutral', '✓', 'Closed'], COMPLETED: ['ok', '✓', 'Counted this week'], DUE: ['warn', '⏳', 'Count due this week'],
+  OVERDUE: ['bad', '!', 'Count overdue'], DRAFT: ['warn', '✎', 'Counting now'], SUBMITTED: ['ok', '✓', 'Signed off'], CANCELLED: ['neutral', '×', 'Cancelled'],
+  HIGH: ['bad', '!', 'Urgent'], MEDIUM: ['warn', '▲', 'Soon'], LOW: ['neutral', '•', 'FYI'],
 };
 export const StatusBadge = ({ s }: { s: string }) => { const [c, i, l] = STATUS[s] ?? ['neutral', '•', s]; return <span className={`badge ${c}`}><span aria-hidden="true">{i}</span>{l}</span>; };
 
 export const ACTION_LABEL: Record<string, string> = {
-  SUPPLIER_RECEIPT: 'Stock received', CHECKOUT_TO_STAFF: 'Taken from store', PLACE_IN_ROOM: 'Placed in room', RETURN_TO_STORE: 'Returned to store',
-  TRANSFER_DISPATCH: 'Sent to another hotel', TRANSFER_RECEIPT: 'Received from hotel', TRANSFER_RESOLUTION: 'Transfer shortfall resolved', WASTE: 'Wasted / damaged',
-  STOCK_ADJUSTMENT: 'Stock adjustment', OPENING_BALANCE: 'Opening balance', REVERSAL: 'Correction (reversal)',
+  SUPPLIER_RECEIPT: 'Stock arrived', CHECKOUT_TO_STAFF: 'Taken from store', PLACE_IN_ROOM: 'Put in room', RETURN_TO_STORE: 'Returned to store',
+  TRANSFER_DISPATCH: 'Sent to another hotel', TRANSFER_RECEIPT: 'Arrived from another hotel', TRANSFER_RESOLUTION: 'Missing items written off', WASTE: 'Damaged / thrown away',
+  STOCK_ADJUSTMENT: 'Count correction', OPENING_BALANCE: 'Starting stock', REVERSAL: 'Mistake undone',
 };
 
 export const fmtTime = (iso: string | Date | null | undefined, tz?: string) =>
@@ -63,8 +63,8 @@ export function Freshness({ asOf, isError, tz }: { asOf?: string; isError: boole
   useEffect(() => { const t = setInterval(() => tick((x) => x + 1), 10000); return () => clearInterval(t); }, []);
   if (!asOf) return null;
   return isError
-    ? <span className="badge warn" role="status">Last updated {fmtClock(asOf, tz)}. Retrying…</span>
-    : <span className="badge neutral" role="status">Updated {fmtClock(asOf, tz)}</span>;
+    ? <span className="badge warn" role="status">Showing {fmtClock(asOf, tz)} — reconnecting…</span>
+    : <span className="small faint" role="status">Live · updated {fmtClock(asOf, tz)}</span>;
 }
 
 /** Single-series horizontal bar list with hover values and accessible text. */

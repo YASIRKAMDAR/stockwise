@@ -1,46 +1,94 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { get, mutate } from '../api';
 import { ACTION_LABEL, BarList, downloadUrl, ErrorBanner, fmtTime, Freshness, Loading, Modal, StatusBadge, useMe } from '../ui/common';
+import { IconArrived, IconChart, IconCheck, IconClock, IconCount, IconHome, IconList, IconSend, IconSettings, IconSignOut, IconStore } from '../ui/icons';
 import { CountHistory, WeeklyCount } from '../manager/Count';
 import { Settings } from './Settings';
+import { Changes, StockCards, TransferCards } from '../manager/ManagerApp';
+import { VoiceAsk, type VoiceGo } from '../ui/VoiceAsk';
 
-type Page = 'overview' | 'count' | 'stock' | 'usage' | 'transfers' | 'alerts' | 'history' | 'activity' | 'reports' | 'settings';
+export type Page = 'today' | 'count' | 'stock' | 'usage' | 'transfers' | 'history' | 'activity' | 'reports' | 'settings';
+
+function useIsPhone() {
+  const q = '(max-width: 760px)';
+  const [m, setM] = useState(() => typeof window !== 'undefined' && window.matchMedia(q).matches);
+  useEffect(() => { const mq = window.matchMedia(q); const f = () => setM(mq.matches); mq.addEventListener('change', f); return () => mq.removeEventListener('change', f); }, []);
+  return m;
+}
 
 export function AdminApp() {
   const { me, logout } = useMe();
+  const phone = useIsPhone();
   const isOwner = me.role === 'OWNER';
-  const pages: [Page, string][] = isOwner
-    ? [['overview', 'Overview'], ['stock', 'Hotels & stock'], ['usage', 'Usage'], ['transfers', 'Transfers'], ['alerts', 'Alerts'], ['history', 'Verification'], ['activity', 'Activity'], ['reports', 'Reports'], ['settings', 'Settings']]
-    : [['count', 'Weekly count'], ['alerts', 'Exceptions'], ['history', 'History'], ['stock', 'Stock'], ['transfers', 'Transfers'], ['activity', 'Activity'], ['overview', 'Overview'], ['settings', 'Settings']];
-  const [page, setPage] = useState<Page>(pages[0][0]);
+  const pages: [Page, string, () => JSX.Element][] = isOwner
+    ? [['today', 'Today', IconHome], ['stock', 'Stock by hotel', IconStore], ['usage', 'Room use', IconChart], ['transfers', 'Between hotels', IconSend], ['history', 'Weekly counts', IconCount], ['activity', 'All changes', IconList], ['reports', 'Reports', IconArrived], ['settings', 'Settings', IconSettings]]
+    : [['today', 'Today', IconHome], ['count', 'Weekly count', IconCount], ['stock', 'Stock', IconStore], ['transfers', 'Between hotels', IconSend], ['activity', 'All changes', IconList], ['history', 'Past counts', IconClock], ['settings', 'Settings', IconSettings]];
+  const [page, setPage] = useState<Page>('today');
   const managed = me.hotels.filter((h) => isOwner || h.roles.includes('MANAGER'));
   const [hotel, setHotel] = useState<string>(isOwner ? 'all' : managed[0]?.id);
   const pickerOptions = isOwner ? [{ id: 'all', name: `All ${managed.length} hotels` }, ...managed] : managed;
 
+  if (phone) {
+    const tabs: [Page, string, () => JSX.Element][] = [['today', 'Today', IconHome], ['stock', 'Stock', IconStore], ['usage', 'Room use', IconChart], ['activity', 'Changes', IconList], ['settings', 'More', IconSettings]];
+    const moreSet: Page[] = ['settings', 'transfers', 'history', 'reports'];
+    return (
+      <div className="app mshell">
+        <header className="topbar">
+          <div className="who">
+            <select aria-label="Hotel" value={hotel} onChange={(e) => setHotel(e.target.value)} style={{ fontWeight: 700 }}>{pickerOptions.map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}</select>
+            <div className="small muted">{me.displayName} · Owner</div>
+          </div>
+          <button className="link" onClick={logout}>Sign out</button>
+        </header>
+        <main className="content">
+          {page === 'today' && <Today hotel={hotel} go={setPage} isOwner />}
+          {page === 'stock' && <StockCards hotelId={hotel} />}
+          {page === 'usage' && <Usage hotel={hotel} />}
+          {page === 'activity' && <Changes hotelId={hotel} />}
+          {page === 'transfers' && <TransferCards hotelId={hotel} />}
+          {page === 'history' && <CountHistory hotel={hotel} />}
+          {page === 'reports' && <Reports hotel={hotel} />}
+          {moreSet.includes(page) && page !== 'transfers' && page !== 'history' && page !== 'reports' && (
+            <>
+              <h1>More</h1>
+              <div className="tiles">
+                <button className="tile" onClick={() => setPage('transfers')}><span className="ic"><IconSend /></span><span className="t">Between hotels</span></button>
+                <button className="tile" onClick={() => setPage('history')}><span className="ic"><IconCount /></span><span className="t">Weekly counts</span></button>
+                <button className="tile" onClick={() => setPage('reports')}><span className="ic"><IconArrived /></span><span className="t">Reports</span></button>
+              </div>
+              <Settings />
+            </>
+          )}
+        </main>
+        <nav className="bottomnav" aria-label="Main"><div>
+          {tabs.map(([k, l, Ico]) => <button key={k} aria-current={(k === 'settings' ? moreSet.includes(page) : page === k) ? 'page' : undefined} onClick={() => setPage(k)}><Ico />{l}</button>)}
+        </div></nav>
+      </div>
+    );
+  }
+
   return (
     <div className="shell">
       <nav className="sidenav" aria-label="Main">
-        <div className="brand row" style={{ padding: '4px 10px 14px' }}><img src="/icon.svg" alt="" width="28" /><b>Stockwise</b></div>
-        {pages.map(([k, l]) => <button key={k} aria-current={page === k ? 'page' : undefined} onClick={() => setPage(k)}>{l}</button>)}
-        <div style={{ flex: 1 }} />
-        <div className="small muted brand" style={{ padding: '0 10px' }}>{me.displayName}<br />{isOwner ? 'Owner' : 'Manager'}</div>
-        <button onClick={logout}>Sign out</button>
+        <div className="brand"><img src="/icon.svg" alt="" width="28" />Stockwise</div>
+        {pages.map(([k, l, Ico]) => <button key={k} aria-current={page === k ? 'page' : undefined} onClick={() => setPage(k)}><Ico />{l}</button>)}
+        <div className="spacer" style={{ flex: 1 }} />
+        <div className="me">{me.displayName}<br />{isOwner ? 'Owner' : 'Manager'}</div>
+        <button onClick={logout}><IconSignOut />Sign out</button>
       </nav>
       <main className="main">
-        {pickerOptions.length > 1 && page !== 'settings' && (
-          <div className="row">
-            <label className="field" style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>Hotel
-              <select value={hotel} onChange={(e) => setHotel(e.target.value)} style={{ width: 'auto' }}>{pickerOptions.map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}</select>
-            </label>
+        {pickerOptions.length > 1 && page !== 'settings' && page !== 'count' && (
+          <div className="hotelpick">
+            <label htmlFor="hotelpick" className="small muted">Showing</label>
+            <select id="hotelpick" value={hotel} onChange={(e) => setHotel(e.target.value)}>{pickerOptions.map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}</select>
           </div>
         )}
-        {page === 'overview' && <Overview hotel={hotel} />}
+        {page === 'today' && <Today hotel={hotel} go={setPage} isOwner={isOwner} />}
         {page === 'count' && <WeeklyCount hotelId={hotel === 'all' ? managed[0].id : hotel} />}
         {page === 'stock' && <Availability hotel={hotel} />}
         {page === 'usage' && <Usage hotel={hotel} />}
         {page === 'transfers' && <TransfersPage hotel={hotel} />}
-        {page === 'alerts' && <Alerts hotel={hotel} />}
         {page === 'history' && <CountHistory hotel={hotel} />}
         {page === 'activity' && <ActivityAdmin hotel={hotel} />}
         {page === 'reports' && <Reports hotel={hotel} />}
@@ -50,55 +98,100 @@ export function AdminApp() {
   );
 }
 
-const usePoll = () => useMe().me.config.ownerPollSeconds * 1000;
+export const usePoll = () => useMe().me.config.ownerPollSeconds * 1000;
+const greeting = () => { const h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; };
 
-function Overview({ hotel }: { hotel: string }) {
-  const [period, setPeriod] = useState(30);
+/** "What needs me today" first, then the stock picture, then each hotel. */
+export function Today({ hotel, go, isOwner }: { hotel: string; go: (p: Page) => void; isOwner: boolean }) {
+  const { me } = useMe();
   const poll = usePoll();
-  const q = useQuery<any>({ queryKey: ['overview', hotel, period], queryFn: () => get(`/dashboard/overview?hotelId=${hotel}&periodDays=${period}`), refetchInterval: poll, refetchIntervalInBackground: false });
-  const d = q.data;
+  const ov = useQuery<any>({ queryKey: ['overview', hotel, 30], queryFn: () => get(`/dashboard/overview?hotelId=${hotel}&periodDays=30`), refetchInterval: poll });
+  const al = useQuery<any>({ queryKey: ['alerts', hotel], queryFn: () => get(`/dashboard/alerts?hotelId=${hotel}`), refetchInterval: poll });
+  const corr = useQuery<any[]>({ queryKey: ['corrections', hotel], queryFn: () => get(`/correction-requests?hotelId=${hotel}`) });
+  const qc = useQueryClient();
+  const d = ov.data;
+  const items: any[] = al.data?.items ?? [];
+  const action = (cat: string): [string, Page] | null =>
+    cat === 'LOW_STOCK' ? ['See stock', 'stock'] : cat.startsWith('TRANSFER') ? ['Open', 'transfers'] : cat === 'COUNT_OVERDUE' ? (isOwner ? ['See counts', 'history'] : ['Start count', 'count'])
+    : cat === 'LARGE_VARIANCE' ? ['See count', 'history'] : cat === 'CORRECTION_REQUEST' ? ['Review', 'activity'] : null;
+  const plain = (a: any) =>
+    a.category === 'LOW_STOCK' ? a.title.replace(' low at ', ' is running low at ').replace(' out of stock at ', ' has run out at ')
+    : a.category === 'TRANSFER_AGED' ? `${a.title.replace(/^Transfer /, 'Delivery ')} hasn't fully arrived`
+    : a.category === 'TRANSFER_DISCREPANCY' ? `${a.title.replace(/^Transfer /, 'Delivery ')} arrived short`
+    : a.category === 'COUNT_OVERDUE' ? a.title.replace('Weekly count overdue at', 'Weekly count not done at')
+    : a.category === 'LARGE_VARIANCE' ? a.title.replace('Large count variance', 'Count found a big difference')
+    : a.title;
   return (
     <>
-      <div className="row spread"><h1>Overview</h1>
-        <div className="row">
-          <div className="seg" role="group" aria-label="Period">{[7, 30, 90].map((p) => <button key={p} aria-pressed={period === p} onClick={() => setPeriod(p)} style={{ padding: '0 14px' }}>{p} days</button>)}</div>
-          <Freshness asOf={d?.asOf} isError={q.isError} />
-        </div>
+      <div className="pagehead">
+        <div><h1>{greeting()}, {me.displayName.split(' ')[0]}</h1><p>{items.length ? `${items.length} ${items.length === 1 ? 'thing needs' : 'things need'} your attention.` : 'Everything is in order.'}</p></div>
+        <Freshness asOf={d?.asOf} isError={ov.isError} />
       </div>
-      {q.isLoading ? <Loading /> : !d ? <ErrorBanner error={q.error} /> : (
+      <VoiceAsk hotelId={hotel === 'all' ? me.hotels[0].id : hotel} scopeAll={hotel === 'all'} onGo={(a: VoiceGo) => {
+        const map: Record<VoiceGo, Page | null> = { SHOW_ALERTS: null, SHOW_TRANSFERS: 'transfers', SHOW_ROOM_USE: isOwner ? 'usage' : null, SHOW_CHANGES: 'activity', START_COUNT: isOwner ? 'history' : 'count' };
+        const p = map[a]; if (p) setTimeout(() => go(p), 900); else document.querySelector('.attention')?.scrollIntoView({ behavior: 'smooth' });
+      }} />
+
+      <section className="attention" aria-label="Needs attention">
+        <div className="head"><h2>Needs attention</h2>{items.length > 0 && <span className="small muted">Most urgent first</span>}</div>
+        {al.isLoading ? <div style={{ padding: 16 }}><Loading /></div> : !items.length ? (
+          <div className="allclear"><IconCheck /> Nothing needs you right now.</div>
+        ) : items.slice(0, 8).map((a) => { const act = action(a.category); return (
+          <div key={a.id} className={`att ${a.severity}`}>
+            <span className="bar" />
+            <div><div className="t">{plain(a)}</div><div className="d">{a.detail}</div></div>
+            <div className="row" style={{ flexWrap: 'nowrap' }}>
+              <StatusBadge s={a.severity} />
+              {act && <button className="btn" onClick={() => go(act[1])}>{act[0]}</button>}
+            </div>
+          </div>); })}
+        {(corr.data ?? []).filter((c) => c.status === 'OPEN').map((c) => (
+          <div key={c.id} className="att LOW">
+            <span className="bar" />
+            <div><div className="t">{c.requestedBy} reported a mistake</div><div className="d">“{c.note}” · {c.hotelName}</div></div>
+            <div className="row" style={{ flexWrap: 'nowrap' }}>
+              <button className="btn" onClick={() => go('activity')}>Fix it</button>
+              <button className="link" onClick={async () => { await mutate(`/correction-requests/${c.id}/dismiss`, {}); qc.invalidateQueries(); }}>Dismiss</button>
+            </div>
+          </div>))}
+      </section>
+
+      {d && (
         <>
-          <h2 className="small muted" style={{ textTransform: 'uppercase' }}>Stock on hand now (units)</h2>
-          <div className="grid">
-            <Kpi v={d.storeAvailableUnits} l="Available in stores" />
-            <Kpi v={d.staffHeldUnits} l="With staff" />
-            <Kpi v={d.inTransitUnits} l="In transit" />
-          </div>
-          <h2 className="small muted" style={{ textTransform: 'uppercase' }}>Activity &amp; exceptions</h2>
-          <div className="grid">
-            <Kpi v={d.placedInRoomsUnits} l={`Amenities placed in rooms (last ${period} days)`} />
-            <Kpi v={d.lowStockCount} l="Low-stock products" tone={d.lowStockCount ? 'warn' : undefined} />
-            <Kpi v={d.overdueCountHotels} l="Overdue weekly counts" tone={d.overdueCountHotels ? 'bad' : undefined} />
-          </div>
-          <div className="card table-wrap">
-            <table>
-              <caption className="sr-only">Per-hotel summary</caption>
-              <thead><tr><th>Hotel</th><th className="num">In store</th><th className="num">With staff</th><th className="num">Sent, in transit</th><th className="num">Placed in rooms ({period}d)</th><th className="num">Low stock</th><th>Weekly count</th></tr></thead>
-              <tbody>{d.hotels.map((h: any) => (
-                <tr key={h.hotelId}><td><b>{h.name}</b></td><td className="num">{h.storeAvailableUnits}</td><td className="num">{h.staffHeldUnits}</td><td className="num">{h.inTransitOutUnits}</td>
-                  <td className="num">{h.placedInRoomsUnits}</td><td className="num">{h.lowStockCount}</td><td><StatusBadge s={h.countState} /> <span className="small muted">{h.lastCountAt ? fmtTime(h.lastCountAt) : 'never'}</span></td></tr>))}</tbody>
-            </table>
-          </div>
-          <p className="small muted">Stock balances and room placements are different measures and are never added together. “Placed in rooms” counts amenities issued to rooms, not guest consumption.</p>
+          <section className="stack" aria-label="Stock right now">
+            <h2>Stock right now</h2>
+            <div className="figs">
+              <div className="fig"><div className="v">{d.storeAvailableUnits.toLocaleString()}</div><div className="l">In the storerooms</div><div className="h">Ready to use</div></div>
+              <div className="fig"><div className="v">{d.staffHeldUnits.toLocaleString()}</div><div className="l">With housekeeping staff</div><div className="h">Taken out, not yet in rooms</div></div>
+              <div className="fig"><div className="v">{d.inTransitUnits.toLocaleString()}</div><div className="l">On the way between hotels</div><div className="h">Sent, not yet received</div></div>
+            </div>
+            <div className="flowfig"><span className="v">{d.placedInRoomsUnits.toLocaleString()}</span><span><b>Put in guest rooms</b> in the last 30 days <span className="faint small">— a separate measure, not part of stock</span></span>
+              {isOwner && <button className="btn quiet" style={{ marginLeft: 'auto' }} onClick={() => go('usage')}>Room use</button>}</div>
+          </section>
+          {d.hotels.length > 1 || isOwner ? (
+            <section className="stack" aria-label="Hotels">
+              <h2>Hotels</h2>
+              <div className="hotels">
+                {d.hotels.map((h: any) => (
+                  <div key={h.hotelId} className="hotel">
+                    <div className="row spread"><h3>{h.name}</h3><StatusBadge s={h.countState} /></div>
+                    <div className="kv">
+                      <span>In storeroom</span><span>{h.storeAvailableUnits}</span>
+                      <span>With staff</span><span>{h.staffHeldUnits}</span>
+                      <span>Sent, on the way</span><span>{h.inTransitOutUnits}</span>
+                      <span>Put in rooms (30 days)</span><span>{h.placedInRoomsUnits}</span>
+                    </div>
+                    <div className="small">{h.lowStockCount ? <span className="badge warn">▲ {h.lowStockCount} running low</span> : <span className="badge ok">✓ Stock OK</span>}
+                      <span className="faint"> · last counted {h.lastCountAt ? fmtTime(h.lastCountAt) : 'never'}</span></div>
+                  </div>))}
+              </div>
+            </section>
+          ) : null}
         </>
       )}
     </>
   );
 }
-const Kpi = ({ v, l, tone }: { v: number; l: string; tone?: 'warn' | 'bad' }) => (
-  <div className="card kpi" style={tone ? { borderColor: `var(--${tone === 'bad' ? 'danger' : 'warning'})` } : undefined}>
-    <span className="v">{v.toLocaleString()}</span><span className="l">{tone && <span aria-hidden="true">{tone === 'bad' ? '! ' : '▲ '}</span>}{l}</span>
-  </div>
-);
 
 function Availability({ hotel }: { hotel: string }) {
   const poll = usePoll();
@@ -110,9 +203,9 @@ function Availability({ hotel }: { hotel: string }) {
   const cell = (h: string, p: string) => items.find((i) => i.hotelId === h && i.productId === p);
   return (
     <>
-      <div className="row spread"><h1>Store availability</h1><div className="row"><Freshness asOf={q.data?.asOf} isError={q.isError} />
+      <div className="row spread"><h1>Stock by hotel</h1><div className="row"><Freshness asOf={q.data?.asOf} isError={q.isError} />
         <button className="btn" onClick={() => downloadUrl(`/reports/stock-events.csv?hotelId=${hotel}`)}>Export activity CSV</button></div></div>
-      <div className="small muted">Store quantity per hotel. <span className="badge warn">▲ Low</span> below reorder level · <span className="badge bad">! Out</span> none in store. Click a product for detail.</div>
+      <div className="small muted">How many are in each hotel's storeroom. <span className="badge warn">▲ Low</span> means below the reorder level, <span className="badge bad">! Out</span> means none left. Click a product to see where it is.</div>
       {q.isLoading ? <Loading /> : (
         <div className="card table-wrap">
           <table>
@@ -165,7 +258,7 @@ function Usage({ hotel }: { hotel: string }) {
   const [showTable, setShowTable] = useState(false);
   return (
     <>
-      <div className="row spread"><h1>Amenities placed in rooms</h1>
+      <div className="row spread"><h1>Room use</h1>
         <div className="row">
           <select value={product} onChange={(e) => setProduct(e.target.value)} style={{ width: 'auto' }} aria-label="Product"><option value="">All products</option>{(products.data ?? []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
           <div className="seg" role="group" aria-label="Period">{[7, 30, 90].map((p) => <button key={p} aria-pressed={period === p} onClick={() => setPeriod(p)} style={{ padding: '0 14px' }}>{p}d</button>)}</div>
@@ -173,7 +266,7 @@ function Usage({ hotel }: { hotel: string }) {
       <p className="small muted">Units issued to rooms by staff. This is not guest consumption — high numbers can reflect room turnover or special requests. Occupancy data is not connected, so per-room-night rates are not shown.</p>
       {q.isLoading ? <Loading /> : !d?.totalUnits ? <div className="card muted">No room placements in this period.</div> : (
         <>
-          <div className="grid"><Kpi v={d.totalUnits} l="Units placed" /><Kpi v={d.placementEvents} l="Placement records" /></div>
+          <div className="figs" style={{ gridTemplateColumns: "1fr 1fr" }}><div className="fig"><div className="v">{d.totalUnits.toLocaleString()}</div><div className="l">Items put in rooms</div></div><div className="fig"><div className="v">{d.placementEvents.toLocaleString()}</div><div className="l">Times staff recorded it</div></div></div>
           <div className="card stack">
             <div className="row spread"><h2>Units placed per day</h2><button className="link" onClick={() => setShowTable(!showTable)}>{showTable ? 'Show chart' : 'Show table'}</button></div>
             {showTable ? <table><thead><tr><th>Day</th><th className="num">Units</th></tr></thead><tbody>{perDay.map((x) => <tr key={x.day}><td>{x.day}</td><td className="num">{x.units}</td></tr>)}</tbody></table> : (
@@ -202,9 +295,9 @@ function TransfersPage({ hotel }: { hotel: string }) {
   const [resolve, setResolve] = useState<any>(null);
   return (
     <>
-      <div className="row spread"><h1>Transfers</h1>
+      <div className="row spread"><h1>Between hotels</h1>
         <select value={status} onChange={(e) => setStatus(e.target.value)} style={{ width: 'auto' }} aria-label="Status">
-          <option value="OPEN">Open (not fully received)</option><option value="DISCREPANCY">Discrepancy</option><option value="RECEIVED">Received</option><option value="RESOLVED">Resolved</option><option value="">All</option>
+          <option value="OPEN">Not fully arrived</option><option value="DISCREPANCY">Arrived short</option><option value="RECEIVED">Arrived</option><option value="RESOLVED">Closed</option><option value="">All</option>
         </select></div>
       {q.isLoading ? <Loading /> : !q.data.items.length ? <div className="card muted">No transfers.</div> : (
         <div className="card table-wrap"><table>
@@ -215,7 +308,7 @@ function TransfersPage({ hotel }: { hotel: string }) {
               <td><StatusBadge s={t.status} />{t.aged && <div><span className="badge warn">▲ Over age limit</span></div>}</td>
               <td className="num">{t.ageHours < 48 ? `${Math.round(t.ageHours)}h` : `${Math.round(t.ageHours / 24)}d`}</td>
               <td>{t.outstandingUnits > 0 && (me.role === 'OWNER' || me.hotels.some((h) => (h.id === t.toHotel.id || h.id === t.fromHotel.id) && h.roles.includes('MANAGER'))) &&
-                <button className="btn" onClick={() => setResolve(t)}>Resolve {t.outstandingUnits}</button>}</td></tr>))}</tbody>
+                <button className="btn" onClick={() => setResolve(t)}>Close {t.outstandingUnits} missing</button>}</td></tr>))}</tbody>
         </table></div>
       )}
       {resolve && <ResolveModal t={resolve} onClose={() => setResolve(null)} />}
@@ -223,18 +316,18 @@ function TransfersPage({ hotel }: { hotel: string }) {
   );
 }
 
-function ResolveModal({ t, onClose }: { t: any; onClose: () => void }) {
+export function ResolveModal({ t, onClose }: { t: any; onClose: () => void }) {
   const qc = useQueryClient();
   const [reason, setReason] = useState('LOST'), [note, setNote] = useState(''), [key] = useState(() => crypto.randomUUID());
   const [error, setError] = useState<unknown>(null), [busy, setBusy] = useState(false);
   const go = async () => { setBusy(true); try { await mutate(`/transfers/${t.id}/resolve`, { reason, note: note || undefined }, key); qc.invalidateQueries(); onClose(); } catch (e) { setError(e); } finally { setBusy(false); } };
   return (
-    <Modal title={`Resolve ${t.refCode}`} onClose={onClose}>
-      <p>{t.outstandingUnits} unit(s) were sent but not received. Resolving writes them off from “in transit” with an auditable reconciliation event. Sent quantities are never edited.</p>
+    <Modal title={`Close missing items on ${t.refCode}`} onClose={onClose}>
+      <p>{t.outstandingUnits} item(s) were sent but never arrived. Closing writes them off as missing and keeps a record of who did it and why.</p>
       <label className="field">Reason<select value={reason} onChange={(e) => setReason(e.target.value)}><option value="LOST">Lost</option><option value="DAMAGED">Damaged</option><option value="COUNTING_ERROR">Counting error when sent</option><option value="OTHER">Other</option></select></label>
       <label className="field">Note<input value={note} onChange={(e) => setNote(e.target.value)} /></label>
       <ErrorBanner error={error} />
-      <button className="btn primary" disabled={busy} onClick={go}>Resolve shortfall</button>
+      <button className="btn primary" disabled={busy} onClick={go}>Write off as missing</button>
     </Modal>
   );
 }
@@ -267,7 +360,7 @@ function ActivityAdmin({ hotel }: { hotel: string }) {
   const [rev, setRev] = useState<any>(null);
   return (
     <>
-      <div className="row spread"><h1>Activity</h1>
+      <div className="row spread"><h1>All changes</h1>
         <select value={action} onChange={(e) => { setAction(e.target.value); setCursor(null); }} style={{ width: 'auto' }} aria-label="Action"><option value="">All actions</option>{Object.entries(ACTION_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></div>
       {q.isLoading ? <Loading /> : (
         <div className="card table-wrap"><table>
@@ -277,8 +370,8 @@ function ActivityAdmin({ hotel }: { hotel: string }) {
               <td>{ACTION_LABEL[e.action]}{e.viaVoice && <span title="Recorded by voice"> 🎙</span>}{e.reason && <div className="small muted">{e.reason}</div>}</td>
               <td className="small">{e.lines.map((l: any) => `${l.quantity} ${l.name}${l.roomNumber ? ` → ${l.roomNumber}` : ''}`).join(' · ')}</td>
               <td className="small">{e.actor.name}</td><td className="small">{e.hotelName}</td>
-              <td>{e.reversedBy ? <span className="badge neutral">Reversed</span> : e.reversalOf ? <span className="badge neutral">Correction</span> :
-                !['TRANSFER_DISPATCH', 'TRANSFER_RECEIPT', 'TRANSFER_RESOLUTION'].includes(e.action) && <button className="link" onClick={() => setRev(e)}>Reverse</button>}</td></tr>))}</tbody>
+              <td>{e.reversedBy ? <span className="badge neutral">Undone</span> : e.reversalOf ? <span className="badge neutral">Undo entry</span> :
+                !['TRANSFER_DISPATCH', 'TRANSFER_RECEIPT', 'TRANSFER_RESOLUTION'].includes(e.action) && <button className="link" onClick={() => setRev(e)}>Undo with a reason</button>}</td></tr>))}</tbody>
         </table>
           {q.data.nextCursor && <button className="btn" onClick={() => setCursor(q.data.nextCursor)}>Older</button>}
         </div>
@@ -288,17 +381,17 @@ function ActivityAdmin({ hotel }: { hotel: string }) {
   );
 }
 
-function ReverseModal({ e, onClose }: { e: any; onClose: () => void }) {
+export function ReverseModal({ e, onClose }: { e: any; onClose: () => void }) {
   const qc = useQueryClient();
   const [reason, setReason] = useState(''), [key] = useState(() => crypto.randomUUID()), [error, setError] = useState<unknown>(null);
   const go = async () => { try { await mutate(`/transactions/${e.eventId}/reversal`, { reason }, key); qc.invalidateQueries(); onClose(); } catch (x) { setError(x); } };
   return (
-    <Modal title="Reverse transaction" onClose={onClose}>
-      <p>This posts a new compensating movement linked to the original. The original record stays in history.</p>
+    <Modal title="Undo this change" onClose={onClose}>
+      <p>This adds a correcting entry that cancels it out. The original stays in the history, marked as undone.</p>
       <div className="card small">{ACTION_LABEL[e.action]}: {e.lines.map((l: any) => `${l.quantity} ${l.name}${l.roomNumber ? ` → room ${l.roomNumber}` : ''}`).join(', ')} · {e.actor.name}</div>
       <label className="field">Reason (required)<input value={reason} onChange={(x) => setReason(x.target.value)} /></label>
       <ErrorBanner error={error} />
-      <button className="btn danger" disabled={reason.trim().length < 3} onClick={go}>Post reversal</button>
+      <button className="btn danger" disabled={reason.trim().length < 3} onClick={go}>Undo it</button>
     </Modal>
   );
 }

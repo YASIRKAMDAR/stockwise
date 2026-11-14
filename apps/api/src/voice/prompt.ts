@@ -10,7 +10,10 @@ If the speaker corrects themselves ("50 nahi 15"), use the corrected value and m
 
 Actions: SUPPLIER_RECEIPT (stock arrived/received from supplier), CHECKOUT_TO_STAFF (took from store),
 PLACE_IN_ROOM (placed/kept in a room), RETURN_TO_STORE (returned to store), TRANSFER_DISPATCH (sent to another hotel),
-TRANSFER_RECEIPT (received from another hotel), STOCK_QUERY (asking how many), UNKNOWN.
+TRANSFER_RECEIPT (received from another hotel), STOCK_QUERY (asking how many / how much is left, optionally at a named hotel),
+SHOW_ALERTS (asking what is low, running out or needs attention), SHOW_TRANSFERS (asking about deliveries/transfers between hotels),
+SHOW_ROOM_USE (asking how much was used or put in rooms), SHOW_CHANGES (asking to see recent changes/history), START_COUNT (asking to start the weekly count), UNKNOWN.
+SHOW_* and START_COUNT never change stock; for them items may be empty.
 
 Use only the provided canonical hotel list, product list and alias dictionary as
 reference context; do not invent products or room numbers. Put the spoken product
@@ -30,7 +33,7 @@ export const RESPONSE_JSON_SCHEMA = {
   type: 'object',
   properties: {
     language: { type: 'string', enum: ['gu-IN', 'hi-IN', 'en-IN', 'mixed', 'unknown'] },
-    action: { type: 'string', enum: ['SUPPLIER_RECEIPT', 'CHECKOUT_TO_STAFF', 'PLACE_IN_ROOM', 'RETURN_TO_STORE', 'TRANSFER_DISPATCH', 'TRANSFER_RECEIPT', 'STOCK_QUERY', 'UNKNOWN'] },
+    action: { type: 'string', enum: ['SUPPLIER_RECEIPT', 'CHECKOUT_TO_STAFF', 'PLACE_IN_ROOM', 'RETURN_TO_STORE', 'TRANSFER_DISPATCH', 'TRANSFER_RECEIPT', 'STOCK_QUERY', 'SHOW_ALERTS', 'SHOW_TRANSFERS', 'SHOW_ROOM_USE', 'SHOW_CHANGES', 'START_COUNT', 'UNKNOWN'] },
     transcript: { type: 'string' },
     items: {
       type: 'array',

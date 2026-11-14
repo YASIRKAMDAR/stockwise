@@ -12,9 +12,9 @@ export const normalizeDigits = (s: string) => s.replace(/[૦-૯०-९]/g, (c)
 
 const WORDS: Record<string, number> = {
   zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, twenty: 20, thirty: 30, forty: 40, fifty: 50, hundred: 100,
-  ek: 1, do: 2, teen: 3, char: 4, chaar: 4, paanch: 5, panch: 5, das: 10, bees: 20, pachees: 25, pachaas: 50, sau: 100,
-  'एक': 1, 'दो': 2, 'तीन': 3, 'चार': 4, 'पांच': 5, 'पाँच': 5, 'दस': 10, 'बीस': 20, 'पच्चीस': 25, 'पचास': 50, 'सौ': 100,
-  'એક': 1, 'બે': 2, 'ત્રણ': 3, 'ચાર': 4, 'પાંચ': 5, 'દસ': 10, 'વીસ': 20, 'પચીસ': 25, 'પચાસ': 50, 'સો': 100,
+  ek: 1, do: 2, teen: 3, char: 4, chaar: 4, paanch: 5, panch: 5, chhe: 6, saat: 7, aath: 8, nau: 9, das: 10, bees: 20, pachees: 25, pachaas: 50, sau: 100,
+  'एक': 1, 'दो': 2, 'तीन': 3, 'चार': 4, 'पांच': 5, 'पाँच': 5, 'छह': 6, 'सात': 7, 'आठ': 8, 'नौ': 9, 'दस': 10, 'बीस': 20, 'पच्चीस': 25, 'पचास': 50, 'सौ': 100,
+  'એક': 1, 'બે': 2, 'ત્રણ': 3, 'ચાર': 4, 'પાંચ': 5, 'છ': 6, 'સાત': 7, 'આઠ': 8, 'નવ': 9, 'દસ': 10, 'વીસ': 20, 'પચીસ': 25, 'પચાસ': 50, 'સો': 100,
 };
 const DIGIT_WORDS = new Set(['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine']);
 const NEG = /^(nahi|nahin|नहीं|નહીં|not)$/;
@@ -22,6 +22,11 @@ const NEG = /^(nahi|nahin|नहीं|નહીં|not)$/;
 const has = (t: string, re: RegExp) => re.test(t);
 
 function detectAction(t: string) {
+  if (has(t, /running low|what.{0,10}low|\blow stock|kam hai|कम है|ઓછ|needs? attention|alerts?/)) return 'SHOW_ALERTS';
+  if (has(t, /(show|open|dikhao|दिखाओ|બતાવો).{0,20}(transfers?|deliver)|\btransfers\b|deliveries|ટ્રાન્સફર બતાવો/)) return 'SHOW_TRANSFERS';
+  if (has(t, /room use|usage|used in rooms|rooms? me kitna|kitna use/)) return 'SHOW_ROOM_USE';
+  if (has(t, /(start|shuru|शुरू|શરૂ).{0,25}(count|ginti|गिनती|ગણતરી)|(count|ginti|गिनती|ગણતરી).{0,20}(start|shuru|शुरू|શરૂ)/)) return 'START_COUNT';
+  if (has(t, /recent changes|show (the )?changes|history|badlav|बदलाव/)) return 'SHOW_CHANGES';
   if (has(t, /kitne|कितने|how many|કેટલા|bache|बचे|left\?|\bleft\b/)) return 'STOCK_QUERY';
   if (has(t, /pacha|પાછા|wapas|वापस|return/)) return 'RETURN_TO_STORE';
   if (has(t, /bhej|भेज|મોકલ|\bsent\b|\bsend\b/)) return 'TRANSFER_DISPATCH';
@@ -47,7 +52,7 @@ export function fakeParse(input: string, ctx: CatalogContext) {
   let hotelCode: string | null = null;
   for (let i = 0; i < toks.length; i++) {
     const w = toks[i].text;
-    if (/^(room|kamra|कमरा|રૂમ)$/.test(w)) {
+    if (/^(room|rum|kamra|कमरा|रूम|રૂમ|ઓરડો)$/.test(w)) {
       let digits = '';
       let j = i + 1;
       if (j < toks.length && /^\d+$/.test(toks[j].text)) { digits = toks[j].text; used.add(j); j++; }
@@ -93,16 +98,19 @@ export function fakeParse(input: string, ctx: CatalogContext) {
     const sourceHint = /store se|storeroom|स्टोर से|સ્ટોરમાંથી|from (the )?store/.test(t) ? 'STORE' : null;
     return { spokenProduct: h.spoken, quantity: qty, roomNumber: room, targetHotelCode: hotelCode, sourceHint };
   });
-  const action = detectAction(t);
-  const missingQty = items.some((i) => i.quantity == null) && action !== 'STOCK_QUERY';
+  let action = detectAction(t);
+  // "Room 203, two soap" with no verb: a room plus items means items were put in the room.
+  if (action === 'UNKNOWN' && rooms.length && hits.length) action = 'PLACE_IN_ROOM';
+  const INFO = new Set(['STOCK_QUERY', 'SHOW_ALERTS', 'SHOW_TRANSFERS', 'SHOW_ROOM_USE', 'SHOW_CHANGES', 'START_COUNT']);
+  const missingQty = items.some((i) => i.quantity == null) && !INFO.has(action);
   const corrected = toks.some((k) => NEG.test(k.text));
   return {
     language: lang,
     action,
     transcript,
-    items: action === 'STOCK_QUERY' && !items.length && hotelCode ? [] : items,
-    clarificationNeeded: action === 'UNKNOWN' || missingQty || (!items.length && action !== 'STOCK_QUERY'),
-    clarificationQuestion: action === 'UNKNOWN' ? 'What did you do with the stock?' : missingQty ? 'How many?' : !items.length && action !== 'STOCK_QUERY' ? 'Which item?' : null,
-    notes: corrected ? 'Speaker corrected a quantity' : hotelCode && action === 'STOCK_QUERY' ? `hotel:${hotelCode}` : null,
+    items: INFO.has(action) && action !== 'STOCK_QUERY' ? [] : items,
+    clarificationNeeded: action === 'UNKNOWN' || (!INFO.has(action) && (missingQty || !items.length)),
+    clarificationQuestion: action === 'UNKNOWN' ? 'What did you do with the stock?' : INFO.has(action) ? null : missingQty ? 'How many?' : !items.length ? 'Which item?' : null,
+    notes: corrected ? 'Speaker corrected a quantity' : hotelCode && INFO.has(action) ? `hotel:${hotelCode}` : null,
   };
 }

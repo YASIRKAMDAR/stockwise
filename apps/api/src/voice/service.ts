@@ -2,7 +2,7 @@ import { VoiceModelOutput, type ProposalLine, type VoiceProposal } from '@stockw
 import type { Config } from '../config.ts';
 import type { Db } from '../db/pool.ts';
 import { err } from '../errors.ts';
-import { requireHotel, rolesAt, type Actor } from '../services/actor.ts';
+import { requireHotel, rolesAt, visibleHotelIds, type Actor } from '../services/actor.ts';
 import { stockMatrix } from '../services/reports.ts';
 import { normalizeDigits } from './fake.ts';
 import type { CatalogContext } from './prompt.ts';
@@ -14,7 +14,8 @@ const LARGE_QTY = 200;
 const norm = (s: string) => normalizeDigits(s.toLowerCase().normalize('NFC')).replace(/[^\p{L}\p{M}\p{N} ]/gu, '').replace(/\s+/g, ' ').trim();
 const singular = (s: string) => s.replace(/(es|s)$/u, '');
 
-export interface InterpretInput { audio: Buffer; mimeType: string; hotelId: string; preferredLanguage?: string; durationMs?: number }
+export interface InterpretInput { audio: Buffer; mimeType: string; hotelId: string; preferredLanguage?: string; durationMs?: number; scopeAll?: boolean }
+const INFO_ACTIONS = new Set(['SHOW_ALERTS', 'SHOW_TRANSFERS', 'SHOW_ROOM_USE', 'SHOW_CHANGES', 'START_COUNT']);
 
 async function loadCatalog(db: Db, orgId: string, hotelId: string) {
   const [products, rooms, hotels] = await Promise.all([
@@ -145,11 +146,15 @@ export async function interpret(db: Db, cfg: Config, provider: VoiceProvider | n
   let queryResult: unknown;
   if (out.action === 'STOCK_QUERY') {
     status = 'QUERY_RESULT';
-    let qHotel = targetHotel?.id ?? input.hotelId;
-    if (qHotel !== input.hotelId && !rolesAt(actor, qHotel).size) { warnings.push('OTHER_HOTEL_NOT_VISIBLE'); qHotel = input.hotelId; }
+    let qHotels = [targetHotel?.id ?? input.hotelId];
+    if (!targetHotel && input.scopeAll && actor.authMethod === 'PASSWORD') qHotels = await visibleHotelIds(db, actor);
+    else if (qHotels[0] !== input.hotelId && !rolesAt(actor, qHotels[0]).size) { warnings.push('OTHER_HOTEL_NOT_VISIBLE'); qHotels = [input.hotelId]; }
     const ids = lines.map((l) => l.productId).filter(Boolean) as string[];
-    const m = (await stockMatrix(db, actor.orgId, [qHotel])).filter((r) => !ids.length || ids.includes(r.productId));
-    queryResult = m.map((r) => ({ hotelName: r.hotelName, productId: r.productId, name: r.name, unit: r.unit, store: r.store, staffHeld: r.staffHeld, inTransit: r.inTransitOut + r.inTransitIn }));
+    const m = (await stockMatrix(db, actor.orgId, qHotels)).filter((r) => !ids.length || ids.includes(r.productId));
+    queryResult = m.map((r) => ({ hotelId: r.hotelId, hotelName: r.hotelName, low: r.low, productId: r.productId, name: r.name, unit: r.unit, store: r.store, staffHeld: r.staffHeld, inTransit: r.inTransitOut + r.inTransitIn }));
+  } else if (INFO_ACTIONS.has(out.action)) {
+    // Opens a screen in the app; nothing is written. targetHotelId (if spoken) narrows the screen.
+    status = 'NAVIGATE';
   } else if (out.action === 'TRANSFER_RECEIPT') {
     status = 'NEEDS_CLARIFICATION';
     warnings.push('USE_INCOMING_TRANSFERS');

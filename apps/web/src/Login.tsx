@@ -15,21 +15,20 @@ export function Login({ onDone }: { onDone: () => void }) {
     } catch (err) { setError(err); } finally { setBusy(false); }
   };
   return (
-    <div className="app">
-      <main className="content" style={{ justifyContent: 'center' }}>
-        <div className="row" style={{ justifyContent: 'center' }}><img src="/icon.svg" alt="" width="56" height="56" /></div>
-        <h1 style={{ textAlign: 'center' }}>Stockwise</h1>
+    <div className="login">
+      <main className="box">
+        <div className="mark"><img src="/icon.svg" alt="" width="52" height="52" /><div><h1>Stockwise</h1><p>Hotel amenities, counted right.</p></div></div>
         <div className="seg" role="group" aria-label="Sign-in type">
-          <button aria-pressed={mode === 'pin'} onClick={() => setMode('pin')} type="button">Staff (PIN)</button>
+          <button aria-pressed={mode === 'pin'} onClick={() => setMode('pin')} type="button">Staff</button>
           <button aria-pressed={mode === 'password'} onClick={() => setMode('password')} type="button">Manager / Owner</button>
         </div>
         {mode === 'pin' && !device ? (
           <div className="banner warn">This phone is not set up for staff yet. A manager must sign in here once and choose <b>Enroll this device for staff</b> in Settings.</div>
         ) : (
-          <form className="card stack" onSubmit={submit}>
+          <form className="stack" onSubmit={submit}>
             {mode === 'pin' && <div className="small muted">Device: {device!.label}</div>}
             <label className="field">Employee code<input autoComplete="username" autoCapitalize="characters" value={code} onChange={(e) => setCode(e.target.value)} required /></label>
-            <label className="field">{mode === 'pin' ? 'PIN' : 'Password'}
+            <label className="field">{mode === 'pin' ? 'PIN (4 digits)' : 'Password'}
               <input type="password" inputMode={mode === 'pin' ? 'numeric' : undefined} autoComplete={mode === 'pin' ? 'off' : 'current-password'} value={secret} onChange={(e) => setSecret(e.target.value)} required />
             </label>
             {error ? <div className="banner bad" role="alert">{errorText(error)}</div> : null}

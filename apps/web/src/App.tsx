@@ -4,6 +4,7 @@ import { Login } from './Login';
 import { MeCtx, type Me, Loading } from './ui/common';
 import { StaffApp } from './staff/StaffApp';
 import { AdminApp } from './owner/AdminApp';
+import { ManagerApp } from './manager/ManagerApp';
 
 export function App() {
   const qc = useQueryClient();
@@ -20,7 +21,7 @@ export function App() {
   const m = me.data!;
   return (
     <MeCtx.Provider value={{ me: m, logout }}>
-      {m.authMethod === 'PIN' ? <StaffApp /> : <AdminApp />}
+      {m.authMethod === 'PIN' ? <StaffApp /> : m.role === 'MANAGER' ? <ManagerApp /> : <AdminApp />}
     </MeCtx.Provider>
   );
 }

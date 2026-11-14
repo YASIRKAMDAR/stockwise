@@ -147,3 +147,52 @@ describe('Provider outage', () => {
     await app.close();
   });
 });
+
+describe('Manager/owner voice requests (open a screen or answer a question; never write)', () => {
+  it.each([
+    ['What is running low?', 'SHOW_ALERTS'],
+    ['Show transfers', 'SHOW_TRANSFERS'],
+    ['Start the weekly count', 'START_COUNT'],
+    ['Show recent changes', 'SHOW_CHANGES'],
+  ])('"%s" -> %s', async (text, action) => {
+    const owner = await pwClient(w, 'OWNER');
+    const before = (await w.db.query('SELECT count(*)::int n FROM inventory_events')).rows[0].n;
+    const r = await interpret(owner, text);
+    expect(r.status).toBe(200);
+    expect(r.body.action).toBe(action);
+    expect(r.body.status).toBe('NAVIGATE');
+    expect((await w.db.query('SELECT count(*)::int n FROM inventory_events')).rows[0].n).toBe(before);
+  });
+  it('owner stock question across all hotels', async () => {
+    const owner = await pwClient(w, 'OWNER');
+    const f = multipart({ hotelId: w.h[0], scope: 'all' }, 'How many soap are left?');
+    const res = await w.app.inject({ method: 'POST', url: '/api/v1/voice/interpret', payload: f.body, headers: { ...f.headers, cookie: owner.cookie, 'x-requested-with': 'stockwise' } });
+    const b = res.json();
+    expect(b.status).toBe('QUERY_RESULT');
+    expect(new Set(b.queryResult.map((x: any) => x.hotelId)).size).toBe(3);
+    expect(b.queryResult.every((x: any) => x.name === 'Soap')).toBe(true);
+  });
+  it('staff cannot widen a stock question to other hotels', async () => {
+    const f = multipart({ hotelId: w.h[0], scope: 'all' }, 'How many soap are left?');
+    const res = await w.app.inject({ method: 'POST', url: '/api/v1/voice/interpret', payload: f.body, headers: { ...f.headers, cookie: s1.cookie, 'x-requested-with': 'stockwise' } });
+    expect(new Set(res.json().queryResult.map((x: any) => x.hotelId))).toEqual(new Set([w.h[0]]));
+  });
+});
+
+describe('Test-mode parser: voice-first phrasing', async () => {
+  const { fakeParse } = await import('../src/voice/fake.ts');
+  const ctx = { products: [
+    { sku: 'SOAP', name: 'Soap', aliases: ['soap', 'sabun', 'साबुन', 'સાબુ'] },
+    { sku: 'SHAMPOO', name: 'Shampoo', aliases: ['shampoo', 'शैम्पू', 'શેમ્પૂ'] },
+  ] } as any;
+  it('room + items with no verb means put in room', () => {
+    const r = fakeParse('Room 203, two soap and one shampoo', ctx);
+    expect(r.action).toBe('PLACE_IN_ROOM');
+    expect(r.items.map((i) => [i.quantity, i.roomNumber])).toEqual([[2, '203'], [1, '203']]);
+  });
+  it('understands रूम and Hindi number words', () => {
+    const r = fakeParse('रूम 115 में छह साबुन', ctx);
+    expect(r.action).toBe('PLACE_IN_ROOM');
+    expect(r.items[0]).toMatchObject({ quantity: 6, roomNumber: '115' });
+  });
+});

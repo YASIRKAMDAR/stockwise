@@ -3,6 +3,12 @@ import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { App } from './App';
 import { ApiError } from './api';
+import '@fontsource/hind-vadodara/400.css';
+import '@fontsource/hind-vadodara/600.css';
+import '@fontsource/hind-vadodara/700.css';
+import '@fontsource/hind/400.css';
+import '@fontsource/hind/600.css';
+import '@fontsource/hind/700.css';
 import './styles.css';
 
 export const queryClient = new QueryClient({

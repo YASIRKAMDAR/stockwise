@@ -33,8 +33,15 @@ export const VOICE_ACTIONS = [
   'TRANSFER_DISPATCH',
   'TRANSFER_RECEIPT',
   'STOCK_QUERY',
+  // Requests from managers/owners that open a screen; never change stock.
+  'SHOW_ALERTS',
+  'SHOW_TRANSFERS',
+  'SHOW_ROOM_USE',
+  'SHOW_CHANGES',
+  'START_COUNT',
   'UNKNOWN',
 ] as const;
+export const NAVIGATE_ACTIONS = ['SHOW_ALERTS', 'SHOW_TRANSFERS', 'SHOW_ROOM_USE', 'SHOW_CHANGES', 'START_COUNT'] as const;
 export type VoiceAction = (typeof VOICE_ACTIONS)[number];
 
 export const TRANSFER_STATUSES = ['IN_TRANSIT', 'PARTIALLY_RECEIVED', 'RECEIVED', 'DISCREPANCY', 'RESOLVED'] as const;
@@ -201,7 +208,7 @@ export interface ProposalLine {
 }
 export interface VoiceProposal {
   proposalId: string;
-  status: 'READY_TO_CONFIRM' | 'NEEDS_CLARIFICATION' | 'QUERY_RESULT';
+  status: 'READY_TO_CONFIRM' | 'NEEDS_CLARIFICATION' | 'QUERY_RESULT' | 'NAVIGATE';
   detectedLanguage: string;
   transcript: string;
   action: VoiceAction;
