@@ -30,7 +30,7 @@ android {
     buildTypes {
         release {
             minifyEnabled false
-            signingConfig (ksFile != null && ksFile.exists()) ? signingConfigs.release : signingConfigs.debug
+            signingConfig = (ksFile != null && ksFile.exists()) ? signingConfigs.release : signingConfigs.debug
         }
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
