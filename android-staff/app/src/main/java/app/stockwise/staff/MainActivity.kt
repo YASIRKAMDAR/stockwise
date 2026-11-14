@@ -7,6 +7,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import androidx.emoji2.bundled.BundledEmojiCompatConfig
+import androidx.emoji2.text.EmojiCompat
 import app.stockwise.staff.ui.Mic
 import app.stockwise.staff.ui.StaffApp
 
@@ -30,6 +32,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Item pictures are emoji; bundle the font so older phones show them too.
+        runCatching { EmojiCompat.init(BundledEmojiCompatConfig(this).setReplaceAll(true)) }
         state = AppState(this)
         listener = HoldListener(this)
         speaker = Speaker(this)
