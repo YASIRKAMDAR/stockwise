@@ -1,0 +1,41 @@
+plugins { id 'com.android.application' }
+
+// The app opens this site inside Chrome (Trusted Web Activity), so voice and updates work exactly like the web app.
+def siteHost = 'stockwise-ten-ivory.vercel.app'
+def ksFile = System.getenv('STOCKWISE_KEYSTORE') ? file(System.getenv('STOCKWISE_KEYSTORE')) : null
+
+android {
+    namespace 'app.stockwise.hotel'
+    compileSdk 34
+    defaultConfig {
+        applicationId 'app.stockwise.hotel'
+        minSdk 24
+        targetSdk 34
+        versionCode((System.getenv('VERSION_CODE') ?: '1') as int)
+        versionName "1.0.${System.getenv('VERSION_CODE') ?: '0'}"
+        manifestPlaceholders = [hostName: siteHost, launchUrl: "https://${siteHost}/?source=android"]
+        resValue 'string', 'app_name', 'Stockwise'
+        resValue 'string', 'asset_statements', """[{"relation":["delegate_permission/common.handle_all_urls"],"target":{"namespace":"web","site":"https://${siteHost}"}}]"""
+    }
+    signingConfigs {
+        release {
+            if (ksFile != null && ksFile.exists()) {
+                storeFile ksFile
+                storePassword System.getenv('STOCKWISE_KEYSTORE_PASSWORD')
+                keyAlias 'stockwise'
+                keyPassword System.getenv('STOCKWISE_KEYSTORE_PASSWORD')
+            }
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig (ksFile != null && ksFile.exists()) ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+}
+
+dependencies {
+    implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.5.0'
+}

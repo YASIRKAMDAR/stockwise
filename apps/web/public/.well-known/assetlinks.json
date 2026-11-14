@@ -1,0 +1,8 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "app.stockwise.hotel",
+    "sha256_cert_fingerprints": ["9A:96:4A:08:FE:08:03:CB:D9:62:C5:55:71:FB:B5:11:8F:B9:88:1D:E9:1C:2D:A3:E0:DA:A3:CE:DE:C8:B1:31"]
+  }
+}]

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { api, errorText, getDevice } from './api';
+import { InstallApp } from './ui/InstallApp';
 
 export function Login({ onDone }: { onDone: () => void }) {
   const device = getDevice();
@@ -17,7 +18,7 @@ export function Login({ onDone }: { onDone: () => void }) {
   return (
     <div className="login">
       <main className="box">
-        <div className="mark"><img src="/icon.svg" alt="" width="52" height="52" /><div><h1>Stockwise</h1><p>Hotel amenities, counted right.</p></div></div>
+        <div className="mark"><img src="/icons/icon-192.png" alt="" width="52" height="52" /><div><h1>Stockwise</h1><p>Hotel amenities, counted right.</p></div></div>
         <div className="seg" role="group" aria-label="Sign-in type">
           <button aria-pressed={mode === 'pin'} onClick={() => setMode('pin')} type="button">Staff</button>
           <button aria-pressed={mode === 'password'} onClick={() => setMode('password')} type="button">Manager / Owner</button>
@@ -35,6 +36,7 @@ export function Login({ onDone }: { onDone: () => void }) {
             <button className="btn primary lg block" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
           </form>
         )}
+        <InstallApp />
       </main>
     </div>
   );

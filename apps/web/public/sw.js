@@ -1,7 +1,7 @@
 // Online-first service worker: caches the app shell and static assets ONLY.
 // API responses (private stock data) are never cached, so shared devices can't leak another user's data.
-const CACHE = 'stockwise-shell-v1';
-self.addEventListener('install', (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(['/', '/index.html', '/manifest.webmanifest', '/icon.svg']))); self.skipWaiting(); });
+const CACHE = 'stockwise-shell-v2';
+self.addEventListener('install', (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(['/', '/index.html', '/manifest.webmanifest', '/icon.svg', '/icons/icon-192.png']))); self.skipWaiting(); });
 self.addEventListener('activate', (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k))))); self.clients.claim(); });
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);

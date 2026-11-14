@@ -99,6 +99,12 @@ export async function buildApp({ db, cfg, voice }: AppDeps) {
 
   if (cfg.SERVE_WEB_DIR && existsSync(cfg.SERVE_WEB_DIR)) {
     await app.register(fastifyStatic, { root: cfg.SERVE_WEB_DIR, wildcard: false, list: false, dotfiles: 'deny' });
+    // Android app link verification (the static server denies dot-folders, so this one file is served explicitly).
+    app.get('/.well-known/assetlinks.json', async (_req, reply) => {
+      const { readFile } = await import('node:fs/promises');
+      try { return reply.type('application/json').send(await readFile(`${cfg.SERVE_WEB_DIR}/.well-known/assetlinks.json`, 'utf8')); }
+      catch { return reply.code(404).send({ error: 'NOT_FOUND' }); }
+    });
     // App shell and service worker must revalidate so deploys take effect; hashed assets can cache long.
     app.addHook('onSend', async (req, reply, payload) => {
       if (req.url.startsWith('/api/')) return payload;

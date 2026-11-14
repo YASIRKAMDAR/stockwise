@@ -288,3 +288,8 @@ td.num, th.num { text-align: right; }
 .homebar i { display: block; height: 100%; background: var(--mint); animation: homebar 3.5s linear forwards; }
 @keyframes homebar { from { width: 100%; } to { width: 0; } }
 @media (prefers-reduced-motion: reduce) { .homebar i { animation: none; width: 50%; } }
+
+/* install */
+.btn.install { gap: 10px; border: 2px solid var(--indigo); color: var(--indigo); font-weight: 700; }
+.btn.install img { border-radius: 6px; }
+.install-hint { text-align: center; margin: 0; }
