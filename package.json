@@ -17,6 +17,6 @@
     "build:vercel": "node scripts/build-vercel.mjs"
   },
   "engines": {
-    "node": ">=20"
+    "node": "22.x"
   }
 }
