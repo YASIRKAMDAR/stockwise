@@ -159,6 +159,16 @@ describe('Provider outage', () => {
     expect(v2.statusCode).toBe(503);
     await app.close();
   });
+  it('staff see their own last attempts, never anyone else\'s', async () => {
+    const r = await s1.get('/me/voice-attempts?limit=3');
+    expect(r.status).toBe(200);
+    expect(r.body.attempts.length).toBeLessThanOrEqual(3);
+    expect(r.body.attempts[0]).toHaveProperty('transcript');
+    expect(r.body.attempts[0]).not.toHaveProperty('audio_bytes');
+    const other = await staffClient(w, 'S2A', 1);
+    const o = await other.get('/me/voice-attempts');
+    expect(o.body.attempts.length).toBe(0);
+  });
   it('owner sees voice health by language and app', async () => {
     const r = await owner.get('/dashboard/voice-health?days=7');
     expect(r.status).toBe(200);

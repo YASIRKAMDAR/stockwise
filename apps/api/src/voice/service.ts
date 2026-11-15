@@ -212,6 +212,7 @@ export async function voiceHealth(db: Db, orgId: string, days: number) {
   const agg = `count(*)::int AS attempts,
        count(*) FILTER (WHERE status='SUCCESS')::int AS success, count(*) FILTER (WHERE status='AMBIGUOUS')::int AS ambiguous, count(*) FILTER (WHERE status='FAILED')::int AS failed,
        count(*) FILTER (WHERE fallback IS NOT NULL)::int AS fallback,
+       COALESCE(sum(cost_usd),0)::float AS cost_usd,
        COALESCE(percentile_cont(0.5) WITHIN GROUP (ORDER BY latency_ms),0)::int AS p50_ms,
        COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms),0)::int AS p95_ms`;
   const args = [orgId, String(days)];
@@ -225,4 +226,14 @@ export async function voiceHealth(db: Db, orgId: string, days: number) {
         WHERE a.organization_id = $1 AND a.created_at > now() - ($2 || ' days')::interval ORDER BY a.created_at DESC LIMIT 25`, args),
   ]);
   return { total: total.rows[0], byDay: byDay.rows, byLanguage: byLang.rows, byClient: byClient.rows, recent: recent.rows };
+}
+
+/** A staff member's own recent attempts, so they (or whoever is testing with them) can see what the app heard. Never audio. */
+export async function myVoiceAttempts(db: Db, userId: string, limit = 5) {
+  const r = await db.query(
+    `SELECT a.created_at, a.status, a.error_code, a.language_detected AS language, a.client, a.input_kind, a.fallback, a.latency_ms,
+            p.proposal->>'transcript' AS transcript, p.proposal->>'action' AS action, (p.consumed_event_id IS NOT NULL) AS confirmed
+       FROM voice_parse_attempts a LEFT JOIN voice_proposals p ON p.id = a.proposal_id
+      WHERE a.user_id = $1 ORDER BY a.created_at DESC LIMIT $2`, [userId, limit]);
+  return r.rows;
 }

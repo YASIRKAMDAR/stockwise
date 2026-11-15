@@ -16,7 +16,7 @@ import { requireKey } from '../services/idempotency.ts';
 import * as reports from '../services/reports.ts';
 import { createTransaction, reverseTransaction } from '../services/transactions.ts';
 import { dispatchTransfer, listTransfers, receiveTransfer, resolveTransfer } from '../services/transfers.ts';
-import { interpret, voiceHealth, voiceUsage } from '../voice/service.ts';
+import { interpret, myVoiceAttempts, voiceHealth, voiceUsage } from '../voice/service.ts';
 import type { VoiceProvider } from '../voice/provider.ts';
 
 interface Deps { db: Db; cfg: Config; provider: VoiceProvider | null }
@@ -62,6 +62,10 @@ export async function registerRoutes(app: FastifyInstance, { db, cfg, provider }
       activeHotel: a.activeHotelId, deviceId: a.deviceId,
       config: { voiceProvider: provider?.name ?? 'disabled', voiceMaxSeconds: cfg.VOICE_MAX_SECONDS, ownerPollSeconds: cfg.OWNER_POLL_INTERVAL_SECONDS },
     };
+  });
+  app.get('/me/voice-attempts', async (req) => {
+    const a = requireActor(req);
+    return { attempts: await myVoiceAttempts(db, a.userId, Math.min(20, Number(Q(req).limit ?? 5) || 5)) };
   });
   app.patch('/me', async (req) => {
     const a = requireActor(req);
