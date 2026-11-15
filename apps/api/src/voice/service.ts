@@ -4,7 +4,7 @@ import type { Db } from '../db/pool.ts';
 import { err } from '../errors.ts';
 import { requireHotel, rolesAt, visibleHotelIds, type Actor } from '../services/actor.ts';
 import { stockMatrix } from '../services/reports.ts';
-import { normalizeDigits } from './fake.ts';
+import { fakeParse, normalizeDigits } from './fake.ts';
 import type { CatalogContext } from './prompt.ts';
 import type { VoiceProvider } from './provider.ts';
 
@@ -14,7 +14,7 @@ const LARGE_QTY = 200;
 const norm = (s: string) => normalizeDigits(s.toLowerCase().normalize('NFC')).replace(/[^\p{L}\p{M}\p{N} ]/gu, '').replace(/\s+/g, ' ').trim();
 const singular = (s: string) => s.replace(/(es|s)$/u, '');
 
-export interface InterpretInput { audio: Buffer; mimeType: string; hotelId: string; preferredLanguage?: string; durationMs?: number; scopeAll?: boolean }
+export interface InterpretInput { audio: Buffer; mimeType: string; hotelId: string; preferredLanguage?: string; durationMs?: number; scopeAll?: boolean; client?: string; heardText?: string }
 const INFO_ACTIONS = new Set(['SHOW_ALERTS', 'SHOW_TRANSFERS', 'SHOW_ROOM_USE', 'SHOW_CHANGES', 'START_COUNT']);
 
 async function loadCatalog(db: Db, orgId: string, hotelId: string) {
@@ -68,13 +68,16 @@ export async function interpret(db: Db, cfg: Config, provider: VoiceProvider | n
   };
 
   const started = Date.now();
+  const client = (input.client ?? '').slice(0, 20) || null;
+  const inputKind = textFixture ? 'text' : 'audio';
+  let fallback: string | null = null;
   const logAttempt = async (status: 'SUCCESS' | 'AMBIGUOUS' | 'FAILED', extra: { proposalId?: string; language?: string; inputTokens?: number | null; outputTokens?: number | null; model?: string; errorCode?: string }) => {
     const cost = ((extra.inputTokens ?? 0) * cfg.VOICE_PRICE_INPUT_PER_M_USD + (extra.outputTokens ?? 0) * cfg.VOICE_PRICE_OUTPUT_PER_M_USD) / 1_000_000;
     await db.query(
-      `INSERT INTO voice_parse_attempts (organization_id, user_id, hotel_id, proposal_id, model_name, language_detected, duration_ms, audio_bytes, input_tokens, output_tokens, cost_usd, latency_ms, status, error_code)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+      `INSERT INTO voice_parse_attempts (organization_id, user_id, hotel_id, proposal_id, model_name, language_detected, duration_ms, audio_bytes, input_tokens, output_tokens, cost_usd, latency_ms, status, error_code, client, input_kind, fallback)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
       [actor.orgId, actor.userId, input.hotelId, extra.proposalId ?? null, extra.model ?? provider.name, extra.language ?? null, input.durationMs ?? null, input.audio.length,
-       extra.inputTokens ?? null, extra.outputTokens ?? null, cost, Date.now() - started, status, extra.errorCode ?? null],
+       extra.inputTokens ?? null, extra.outputTokens ?? null, cost, Date.now() - started, status, extra.errorCode ?? null, client, inputKind, fallback],
     );
   };
 
@@ -82,8 +85,15 @@ export async function interpret(db: Db, cfg: Config, provider: VoiceProvider | n
   try {
     result = await provider.extract(input.audio, textFixture ? 'text/plain' : mime, ctx);
   } catch (e: any) {
-    await logAttempt('FAILED', { errorCode: e?.code ?? 'PROVIDER_ERROR' });
-    throw e?.code ? e : err('TEMPORARY_UNAVAILABLE', "We couldn't understand that recording. Try again or enter it manually.");
+    // Google is slow or down. If the phone heard words, the rules parser answers from those instead of failing.
+    const heard = textFixture ? input.audio.toString('utf8') : (input.heardText ?? '').trim();
+    if (heard && provider.name !== 'fake') {
+      fallback = 'rules';
+      result = { raw: fakeParse(heard, ctx), inputTokens: 0, outputTokens: 0, model: 'fake-rule-parser', simulated: true };
+    } else {
+      await logAttempt('FAILED', { errorCode: e?.code ?? 'PROVIDER_ERROR' });
+      throw e?.code ? e : err('TEMPORARY_UNAVAILABLE', "We couldn't understand that recording. Try again or enter it manually.");
+    }
   }
   const parsed = VoiceModelOutput.safeParse(result.raw);
   if (!parsed.success) {
@@ -92,7 +102,8 @@ export async function interpret(db: Db, cfg: Config, provider: VoiceProvider | n
   }
   const out = parsed.data;
   const warnings: string[] = [];
-  if (result.simulated) warnings.push('SIMULATED_PROVIDER');
+  if (result.simulated && !fallback) warnings.push('SIMULATED_PROVIDER');
+  if (fallback) warnings.push('FALLBACK_RULES');
   if (out.notes) warnings.push(`MODEL_NOTE:${out.notes.slice(0, 120)}`);
 
   // Resolve against canonical catalog. Model output is untrusted.
@@ -193,4 +204,25 @@ export async function voiceUsage(db: Db, orgId: string, days: number) {
     [orgId, String(days)],
   );
   return r.rows;
+}
+
+/** Voice health for the last N days: success rate and latency, by day, by language and by app, plus the most recent attempts (never audio). */
+export async function voiceHealth(db: Db, orgId: string, days: number) {
+  const where = `organization_id = $1 AND created_at > now() - ($2 || ' days')::interval`;
+  const agg = `count(*)::int AS attempts,
+       count(*) FILTER (WHERE status='SUCCESS')::int AS success, count(*) FILTER (WHERE status='AMBIGUOUS')::int AS ambiguous, count(*) FILTER (WHERE status='FAILED')::int AS failed,
+       count(*) FILTER (WHERE fallback IS NOT NULL)::int AS fallback,
+       COALESCE(percentile_cont(0.5) WITHIN GROUP (ORDER BY latency_ms),0)::int AS p50_ms,
+       COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms),0)::int AS p95_ms`;
+  const args = [orgId, String(days)];
+  const [total, byDay, byLang, byClient, recent] = await Promise.all([
+    db.query(`SELECT ${agg} FROM voice_parse_attempts WHERE ${where}`, args),
+    db.query(`SELECT to_char(date_trunc('day', created_at), 'YYYY-MM-DD') AS day, ${agg} FROM voice_parse_attempts WHERE ${where} GROUP BY 1 ORDER BY 1 DESC`, args),
+    db.query(`SELECT COALESCE(language_detected,'unknown') AS language, ${agg} FROM voice_parse_attempts WHERE ${where} GROUP BY 1 ORDER BY attempts DESC`, args),
+    db.query(`SELECT COALESCE(client,'unknown') AS client, ${agg} FROM voice_parse_attempts WHERE ${where} GROUP BY 1 ORDER BY attempts DESC`, args),
+    db.query(`SELECT a.created_at, a.status, a.error_code, a.language_detected AS language, a.client, a.input_kind, a.fallback, a.latency_ms, a.duration_ms, u.display_name AS user, p.proposal->>'transcript' AS transcript, p.proposal->>'action' AS action, (p.consumed_event_id IS NOT NULL) AS confirmed
+         FROM voice_parse_attempts a JOIN users u ON u.id = a.user_id LEFT JOIN voice_proposals p ON p.id = a.proposal_id
+        WHERE a.organization_id = $1 AND a.created_at > now() - ($2 || ' days')::interval ORDER BY a.created_at DESC LIMIT 25`, args),
+  ]);
+  return { total: total.rows[0], byDay: byDay.rows, byLanguage: byLang.rows, byClient: byClient.rows, recent: recent.rows };
 }

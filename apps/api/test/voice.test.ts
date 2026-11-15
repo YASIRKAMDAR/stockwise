@@ -141,6 +141,34 @@ describe('Gemini adapter (HTTP contract, mocked fetch — no live call)', () => 
 });
 
 describe('Provider outage', () => {
+  it('Google down + words the phone heard -> rules parser answers, attempt logged as fallback', async () => {
+    const { buildApp } = await import('../src/app.ts');
+    const cfg = loadConfig({ NODE_ENV: 'test', DATABASE_URL: 'postgres://unused', SESSION_SECRET: 'x'.repeat(40), VOICE_PROVIDER: 'gemini', GEMINI_API_KEY: 'k' });
+    const down = { name: 'gemini', extract: async () => { throw new Error('boom'); } };
+    const app = await buildApp({ db: w.db, cfg, voice: down as any });
+    const f = multipart({ hotelId: w.h[0], heard: 'return 2 soap to store', client: 'ios' }, Buffer.alloc(5000, 1).toString('latin1'), 'audio/mp4');
+    const v = await app.inject({ method: 'POST', url: '/api/v1/voice/interpret', payload: f.body, headers: { ...f.headers, cookie: s1.cookie, 'x-requested-with': 'stockwise' } });
+    expect(v.statusCode).toBe(200);
+    expect(v.json().action).toBe('RETURN_TO_STORE');
+    expect(v.json().warnings).toContain('FALLBACK_RULES');
+    const row = (await w.db.query(`SELECT client, input_kind, fallback FROM voice_parse_attempts WHERE user_id = (SELECT id FROM users WHERE employee_code='S1A') ORDER BY created_at DESC LIMIT 1`)).rows[0];
+    expect(row).toMatchObject({ client: 'ios', input_kind: 'audio', fallback: 'rules' });
+    // Nothing heard -> honest failure.
+    const g = multipart({ hotelId: w.h[0] }, 'x', 'audio/mp4');
+    const v2 = await app.inject({ method: 'POST', url: '/api/v1/voice/interpret', payload: g.body, headers: { ...g.headers, cookie: s1.cookie, 'x-requested-with': 'stockwise' } });
+    expect(v2.statusCode).toBe(503);
+    await app.close();
+  });
+  it('owner sees voice health by language and app', async () => {
+    const r = await owner.get('/dashboard/voice-health?days=7');
+    expect(r.status).toBe(200);
+    expect(r.body.total.attempts).toBeGreaterThan(0);
+    expect(r.body.byClient.some((c: any) => c.client === 'ios')).toBe(true);
+    expect(r.body.recent[0]).toHaveProperty('latency_ms');
+    expect(r.body.recent[0]).not.toHaveProperty('audio_bytes');
+    const s = await s1.get('/dashboard/voice-health');
+    expect(s.status).toBe(403);
+  });
   it('voice down does not block manual transactions', async () => {
     const { buildApp } = await import('../src/app.ts');
     const cfg = loadConfig({ NODE_ENV: 'test', DATABASE_URL: 'postgres://unused', SESSION_SECRET: 'x'.repeat(40), VOICE_PROVIDER: 'disabled' });

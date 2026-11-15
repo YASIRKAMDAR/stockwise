@@ -16,7 +16,7 @@ import { requireKey } from '../services/idempotency.ts';
 import * as reports from '../services/reports.ts';
 import { createTransaction, reverseTransaction } from '../services/transactions.ts';
 import { dispatchTransfer, listTransfers, receiveTransfer, resolveTransfer } from '../services/transfers.ts';
-import { interpret, voiceUsage } from '../voice/service.ts';
+import { interpret, voiceHealth, voiceUsage } from '../voice/service.ts';
 import type { VoiceProvider } from '../voice/provider.ts';
 
 interface Deps { db: Db; cfg: Config; provider: VoiceProvider | null }
@@ -397,6 +397,11 @@ export async function registerRoutes(app: FastifyInstance, { db, cfg, provider }
     const a = requireActor(req); requireOwner(a);
     return { model: cfg.GEMINI_MODEL, provider: provider?.name ?? 'disabled', dailyLimitUsd: cfg.VOICE_DAILY_LIMIT_USD, days: await voiceUsage(db, a.orgId, 30) };
   });
+  app.get('/dashboard/voice-health', async (req) => {
+    const a = requireActor(req); requireOwner(a);
+    const days = Math.min(90, Math.max(1, Number(Q(req).days ?? 7) || 7));
+    return { provider: provider?.name ?? 'disabled', model: cfg.GEMINI_MODEL, days, ...(await voiceHealth(db, a.orgId, days)) };
+  });
   app.get('/reports/stock-events.csv', async (req, reply) => {
     const a = requireActor(req);
     const q = Q(req);
@@ -426,6 +431,7 @@ export async function registerRoutes(app: FastifyInstance, { db, cfg, provider }
     return interpret(db, cfg, provider, a, {
       audio, mimeType: mime, hotelId: parse(uuid, fields.hotelId),
       preferredLanguage: fields.preferredLanguage, durationMs: fields.durationMs ? Number(fields.durationMs) : undefined, scopeAll: fields.scope === 'all',
+      client: fields.client, heardText: fields.heard?.slice(0, 500),
     });
   });
 }

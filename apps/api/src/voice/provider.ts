@@ -21,9 +21,12 @@ export class GeminiProvider implements VoiceProvider {
     };
     const url = `${this.cfg.GEMINI_API_BASE}/models/${encodeURIComponent(this.cfg.GEMINI_MODEL)}:generateContent`;
     let lastErr: unknown;
-    for (let attempt = 1; attempt <= 2; attempt++) { // one bounded retry on timeout/5xx; never loops into writes
+    const startedAt = Date.now();
+    for (let attempt = 1; attempt <= 2; attempt++) { // one bounded retry on timeout/5xx, only while the time budget allows; never loops into writes
+      const remaining = this.cfg.VOICE_BUDGET_MS - (Date.now() - startedAt);
+      if (attempt > 1 && remaining < 1500) break;
       const ctl = new AbortController();
-      const t = setTimeout(() => ctl.abort(), this.cfg.GEMINI_TIMEOUT_MS);
+      const t = setTimeout(() => ctl.abort(), Math.min(this.cfg.GEMINI_TIMEOUT_MS, Math.max(remaining, 1000)));
       try {
         const res = await this.fetchImpl(url, {
           method: 'POST', signal: ctl.signal,
