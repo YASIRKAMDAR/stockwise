@@ -278,7 +278,7 @@ final class AppState: ObservableObject {
             else { say(lines.isEmpty ? t.nothingInBag : lines.map { "\($0.native ?? $0.name) \($0.qty)" }.joined(separator: ", ")) }
         case .go(.history):
             post(.text(t.openingHistory, warn: false)); go(.history)
-        case .go(.home):
+        case .go(.home), .go(.attempts):
             break
         case .language(let l):
             setLanguage(l); post(.text(t.languageChanged, warn: false)); say(t.languageChanged)
