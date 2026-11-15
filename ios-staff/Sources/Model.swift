@@ -33,6 +33,13 @@ struct ActivityEvent: Codable, Identifiable {
     var id: String { eventId }
 }
 struct ActivityPage: Codable { let items: [ActivityEvent] }
+/// One of the staff member's own recent voice attempts, as the server logged it (never audio).
+struct VoiceAttempt: Codable, Identifiable {
+    let createdAt: String; let status: String; var errorCode: String?; var language: String?; var client: String?
+    var inputKind: String?; var fallback: String?; var latencyMs: Int?; var transcript: String?; var action: String?; var confirmed: Bool?
+    var id: String { createdAt + (transcript ?? "") }
+}
+struct VoiceAttemptsPage: Codable { let attempts: [VoiceAttempt] }
 struct TxResult: Codable { let eventId: String }
 struct ApiErrorInner: Codable { var code: String?; var message: String? }
 struct ApiErrorBody: Codable { var error: ApiErrorInner? }
@@ -51,7 +58,7 @@ struct Line: Identifiable {
     var spoken: String = ""; var issues: [String] = []
 }
 
-enum AppTab { case home, bag, history }
+enum AppTab { case home, bag, history, attempts }
 enum Step { case room, items, check, done }
 struct Flow {
     var kind: Kind; var step: Step

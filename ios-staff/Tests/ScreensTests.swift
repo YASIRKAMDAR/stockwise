@@ -152,6 +152,13 @@ final class ScreensTests: XCTestCase {
         s.chat = [said("umm the thing"), ChatMessage(role: .app, body: .text(T(lang: "en").notUnderstood, warn: true))]
         try shot("16-chat-not-understood", s)
     }
+    func test20Intro() throws { let s = state(); s.showIntro = true; try shot("20-intro", s) }
+    func test21Attempts() throws {
+        let s = state(); s.tab = .attempts
+        s.attempts = [VoiceAttempt(createdAt: "2026-11-15T10:03:46Z", status: "SUCCESS", errorCode: nil, language: "mixed", client: "ios", inputKind: "audio", fallback: nil, latencyMs: 1361, transcript: "Room 203 ma do soap aur ek shampoo mukyu", action: "PLACE_IN_ROOM", confirmed: true),
+                      VoiceAttempt(createdAt: "2026-11-15T10:03:30Z", status: "FAILED", errorCode: "TEMPORARY_UNAVAILABLE", language: nil, client: "ios", inputKind: "audio", fallback: nil, latencyMs: 5029, transcript: nil, action: nil, confirmed: nil)]
+        try shot("21-voice-attempts", s)
+    }
     func testLocalCommands() {
         XCTAssertEqual(localCommand("my bag"), .go(.bag))
         XCTAssertEqual(localCommand("show history"), .go(.history))

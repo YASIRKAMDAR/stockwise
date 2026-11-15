@@ -8,6 +8,22 @@ struct T {
     var yourCode: String { s("Your code", "आपका कोड", "તમારો કોડ") }
     var passcode: String { s("Passcode", "पासकोड", "પાસકોડ") }
     var tagline: String { s("Hotel amenities, counted right.", "होटल सामान, सही गिनती।", "હોટેલ સામાન, સાચી ગણતરી.") }
+    var howToUse: String { s("How to use", "कैसे चलाएँ", "કેવી રીતે વાપરવું") }
+    var voiceAttempts: String { s("Last voice attempts", "पिछली आवाज़ कोशिशें", "છેલ્લા અવાજ પ્રયાસો") }
+    var introTitle1: String { s("Hold the mic and speak", "माइक दबाकर रखें और बोलें", "માઇક દબાવી રાખો અને બોલો") }
+    var introBody1: String { s("Say what you did, in Gujarati, Hindi or English — mixed is fine. The bars move when it hears you.", "जो किया वह बोलें — गुजराती, हिंदी या अंग्रेज़ी, मिलाकर भी चलेगा। सुनने पर पट्टियाँ हिलती हैं।", "તમે જે કર્યું તે બોલો — ગુજરાતી, હિન્દી કે અંગ્રેજી, ભેળવીને પણ ચાલે. સાંભળે ત્યારે પટ્ટીઓ હલે છે.") }
+    var introTitle2: String { s("Let go to send", "भेजने के लिए छोड़ें", "મોકલવા છોડો") }
+    var introBody2: String { s("Slide left while holding if you want to cancel. Said it wrong? Tap your words to fix them.", "रद्द करना हो तो दबाए हुए बाएँ खिसकाएँ। गलत बोल गए? अपने शब्दों पर दबाकर सुधारें।", "રદ કરવું હોય તો દબાવી રાખીને ડાબે ખસેડો. ખોટું બોલાયું? તમારા શબ્દો પર દબાવીને સુધારો.") }
+    var introTitle3: String { s("Check, then say “yes”", "जाँचें, फिर “हाँ” बोलें", "ચકાસો, પછી “હા” બોલો") }
+    var introBody3: String { s("The app shows what it understood. Hold the small mic and say “haan” or tap ✓. Nothing is saved until you confirm.", "ऐप दिखाता है कि क्या समझा। छोटा माइक दबाकर “हाँ” बोलें या ✓ दबाएँ। पुष्टि से पहले कुछ नहीं बचता।", "ઍપ બતાવે છે કે શું સમજ્યું. નાનો માઇક દબાવીને “હા” બોલો કે ✓ દબાવો. પુષ્ટિ પહેલાં કંઈ સચવાતું નથી.") }
+    var introTitle4: String { s("Try it now", "अभी आज़माएँ", "હમણાં અજમાવો") }
+    var introBody4: String { s("Hold the mic and say “my bag”. This only shows your bag — it changes nothing.", "माइक दबाकर “मेरा बैग” बोलें। यह सिर्फ़ आपका बैग दिखाता है — कुछ बदलता नहीं।", "માઇક દબાવીને “મારી બેગ” બોલો. આ ફક્ત તમારી બેગ બતાવે છે — કંઈ બદલાતું નથી.") }
+    var introNext: String { s("Next", "आगे", "આગળ") }
+    var introTry: String { s("Try it", "आज़माएँ", "અજમાવો") }
+    var introSkip: String { s("Skip", "छोड़ें", "છોડો") }
+    var introDone: String { s("That’s it — you’re ready. 🎉", "बस — आप तैयार हैं। 🎉", "બસ — તમે તૈયાર છો. 🎉") }
+    var introPractice: String { s("Hold the mic and say “my bag”", "माइक दबाकर “मेरा बैग” बोलें", "માઇક દબાવીને “મારી બેગ” બોલો") }
+    var noAttempts: String { s("No voice attempts yet.", "अभी कोई आवाज़ कोशिश नहीं।", "હજુ કોઈ અવાજ પ્રયાસ નથી.") }
     var home: String { s("Home", "होम", "હોમ") }
     var myBag: String { s("My bag", "मेरा बैग", "મારી બેગ") }
     var history: String { s("History", "इतिहास", "ઇતિહાસ") }

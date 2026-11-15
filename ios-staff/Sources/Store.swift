@@ -9,6 +9,10 @@ final class Store {
         get { d.string(forKey: "lang") ?? "en" }
         set { d.set(newValue, forKey: "lang") }
     }
+    var introSeen: Bool {
+        get { d.bool(forKey: "introSeen") }
+        set { d.set(newValue, forKey: "introSeen") }
+    }
     var lastCode: String {
         get { d.string(forKey: "lastCode") ?? "" }
         set { d.set(newValue, forKey: "lastCode") }

@@ -58,6 +58,7 @@ final class Api {
     func bag(_ hotelId: String) async throws -> BagResponse { try await get("/me/stock?hotelId=\(hotelId)") }
     func store(_ hotelId: String) async throws -> StoreResponse { try await get("/hotels/\(hotelId)/stock") }
     func activity(_ hotelId: String) async throws -> ActivityPage { try await get("/transactions?hotelId=\(hotelId)&limit=20") }
+    func voiceAttempts() async throws -> VoiceAttemptsPage { try await get("/me/voice-attempts?limit=10") }
     func setLanguage(_ lang: String) async { _ = try? await raw("PATCH", "/me", body: json(["language": lang])) }
     func logout() async { _ = try? await raw("POST", "/auth/logout"); clearSession() }
 

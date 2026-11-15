@@ -33,6 +33,10 @@ final class AppState: ObservableObject {
     @Published var waitingLong = false
     @Published var draft = ""
     @Published var online = true
+    @Published var showIntro = false
+    @Published var practicing = false
+    @Published var attempts: [VoiceAttempt] = []
+    private var capTimer: Task<Void, Never>?
     private var toldNoGuVoice = false
     @Published var voiceStartedAt = Date()
     @Published var hearingYesNo = false
@@ -59,6 +63,7 @@ final class AppState: ObservableObject {
         Task {
             if api.hasSession {
                 do { try await loadMe(); await loadData() } catch { handle(error) }
+                if me != nil && !store.introSeen { showIntro = true }
             }
             booting = false
             flushOutbox()
@@ -131,6 +136,14 @@ final class AppState: ObservableObject {
         flow = nil; tab = to; menuOpen = false
         if to == .history { loadHistory() }
         if to == .bag { refresh() }
+        if to == .attempts { loadAttempts() }
+    }
+    func loadAttempts() { Task { attempts = (try? await api.voiceAttempts().attempts) ?? [] } }
+    /// The walkthrough: shown once after the first sign-in; "How to use" in the menu opens it again.
+    func openIntro() { menuOpen = false; showIntro = true }
+    func finishIntro(practice: Bool) {
+        store.introSeen = true; showIntro = false
+        if practice { practicing = true; tab = .home; flow = nil; notice = Notice(text: t.introPractice, warn: false); say(t.introPractice) }
     }
 
     // ---------- starting jobs ----------
@@ -174,8 +187,15 @@ final class AppState: ObservableObject {
         if online { notice = nil }
         answer = nil; voiceInterim = ""; voiceLevel = 0; voiceStartedAt = Date(); voiceLive = true
         let started = voiceStartedAt
+        // Recordings stop by themselves at 15 s: long holds cost more and understand less.
+        capTimer?.cancel()
+        capTimer = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 15_000_000_000)
+            if !Task.isCancelled { self?.voiceSend() }
+        }
         mic.start(lang: lang, record: cloud, onInterim: { [weak self] text in self?.voiceInterim = text }, onLevel: { [weak self] l in self?.voiceLevel = l }, onDone: { [weak self] text in
             guard let self = self else { return }
+            self.capTimer?.cancel()
             self.voiceLive = false; self.voiceLevel = 0
             let ms = Int(Date().timeIntervalSince(started) * 1000)
             if cloud, let audio = self.mic.takeRecording(), audio.count > 2000, ms >= 600 {
@@ -254,7 +274,8 @@ final class AppState: ObservableObject {
                 return BagLine(name: p.name, native: p.native(lang), emoji: p.emoji, qty: q)
             }
             post(.bag(lines))
-            say(lines.isEmpty ? t.nothingInBag : lines.map { "\($0.native ?? $0.name) \($0.qty)" }.joined(separator: ", "))
+            if practicing { practicing = false; post(.text(t.introDone, warn: false)); say(t.introDone); notice = nil }
+            else { say(lines.isEmpty ? t.nothingInBag : lines.map { "\($0.native ?? $0.name) \($0.qty)" }.joined(separator: ", ")) }
         case .go(.history):
             post(.text(t.openingHistory, warn: false)); go(.history)
         case .go(.home):
