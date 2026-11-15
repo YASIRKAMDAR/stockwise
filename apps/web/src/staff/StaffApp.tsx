@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError, errorText, get, loadDrafts, mutate, NetworkError, saveDrafts, type Draft } from '../api';
-import { DICTS, LANG_CODES, LANG_NAMES, speak, type FlowKind, type Lang, type T } from '../i18n';
+import { DICTS, hasVoice, LANG_CODES, LANG_NAMES, speak, type FlowKind, type Lang, type T } from '../i18n';
 import { ACTION_LABEL, ErrorBanner, fmtTime, Loading, StatusBadge, Stepper, useMe } from '../ui/common';
 import { IconArrived, IconBag, IconClock, IconHome, IconMic, IconReceive, IconRepeat, IconReturn, IconRoom, IconSend, IconStop, IconTake } from '../ui/icons';
 import { hasSpeechRecognition, localCommand, recognize, type Listener, type LocalCommand } from '../ui/speech';
@@ -21,6 +21,7 @@ export function StaffApp() {
   const t = DICTS[lang];
   const [tab, setTab] = useState<Tab>('home');
   const [flow, setFlow] = useState<FlowState | null>(null);
+  const [fix, setFix] = useState<{ text: string; n: number } | null>(null);   // words to correct, handed to the home composer
   const changeLang = (l: Lang) => { setLang(l); api('PATCH', '/me', { language: l }).catch(() => {}); };
   const start = (kind: FlowKind, extra: Partial<FlowState> = {}) => setFlow({ kind, step: START[kind], lines: [], ...extra });
 
@@ -39,8 +40,8 @@ export function StaffApp() {
         <div className="who" style={{ flex: 1 }}><b>{flow ? t.act[flow.kind]?.[0] ?? hotel.name : tab === 'home' ? hotel.name : nav.find((n) => n[0] === tab)?.[2]}</b><div className="small muted">{me.displayName} · {hotel.name}</div></div>
       </header>
       <main className="content">
-        {flow ? <Flow key={flow.kind + flow.step + (flow.proposalId ?? '')} init={flow} hotelId={hotelId} lang={lang} t={t} onExit={() => setFlow(null)} />
-          : tab === 'home' ? <Home t={t} lang={lang} hotelId={hotelId} start={start} openReceive={() => setTab('transfers')} command={(c) => { if ('go' in c) setTab(c.go); else if ('lang' in c) changeLang(c.lang); else logout(); }} />
+        {flow ? <Flow key={flow.kind + flow.step + (flow.proposalId ?? '')} init={flow} hotelId={hotelId} lang={lang} t={t} onExit={() => setFlow(null)} onFix={(text) => { setFlow(null); setTab('home'); setFix((f) => ({ text, n: (f?.n ?? 0) + 1 })); }} />
+          : tab === 'home' ? <Home t={t} lang={lang} hotelId={hotelId} start={start} fix={fix} openReceive={() => setTab('transfers')} command={(c) => { if ('go' in c) setTab(c.go); else if ('lang' in c) changeLang(c.lang); else logout(); }} />
           : tab === 'bag' ? <MyBag t={t} lang={lang} hotelId={hotelId} start={start} />
           : tab === 'transfers' ? <Transfers t={t} hotelId={hotelId} start={start} />
           : <History t={t} hotelId={hotelId} tz={hotel.timezone} />}
@@ -50,7 +51,7 @@ export function StaffApp() {
 }
 
 // ---------------- Home ----------------
-function Home({ t, lang, hotelId, start, openReceive, command }: { t: T; lang: Lang; hotelId: string; start: (k: FlowKind, extra?: Partial<FlowState>) => void; openReceive: () => void; command: (c: LocalCommand) => void }) {
+function Home({ t, lang, hotelId, start, openReceive, command, fix }: { t: T; lang: Lang; hotelId: string; start: (k: FlowKind, extra?: Partial<FlowState>) => void; openReceive: () => void; command: (c: LocalCommand) => void; fix?: { text: string; n: number } | null }) {
   const { me } = useMe();
   const incoming = useQuery<any[]>({ queryKey: ['transfers', hotelId], queryFn: () => get(`/transfers?hotelId=${hotelId}`) });
   const nIncoming = (incoming.data ?? []).filter((x) => x.toHotel.id === hotelId && ['IN_TRANSIT', 'PARTIALLY_RECEIVED'].includes(x.status)).length;
@@ -59,7 +60,7 @@ function Home({ t, lang, hotelId, start, openReceive, command }: { t: T; lang: L
   return (
     <>
       <Drafts t={t} />
-      <Voice t={t} lang={lang} hotelId={hotelId} start={start} openReceive={openReceive} command={command} />
+      <Voice t={t} lang={lang} hotelId={hotelId} start={start} openReceive={openReceive} command={command} fix={fix} />
       <p className="small muted" style={{ margin: '4px 0 -6px' }}>{t.orTap}</p>
       <div className="tiles">
         <button className="tile primary-tile" onClick={() => start('PLACE_IN_ROOM')}>
@@ -88,7 +89,7 @@ function Home({ t, lang, hotelId, start, openReceive, command }: { t: T; lang: L
 }
 
 type RecState = 'idle' | 'asking' | 'recording' | 'uploading';
-function Voice({ t, lang, hotelId, start, openReceive, command }: { t: T; lang: Lang; hotelId: string; start: (k: FlowKind, extra?: Partial<FlowState>) => void; openReceive: () => void; command: (c: LocalCommand) => void }) {
+function Voice({ t, lang, hotelId, start, openReceive, command, fix }: { t: T; lang: Lang; hotelId: string; start: (k: FlowKind, extra?: Partial<FlowState>) => void; openReceive: () => void; command: (c: LocalCommand) => void; fix?: { text: string; n: number } | null }) {
   const { me } = useMe();
   const [state, setState] = useState<RecState>('idle');
   const [msg, setMsg] = useState<{ tone: 'warn' | 'bad'; text: string } | null>(null);
@@ -96,6 +97,42 @@ function Voice({ t, lang, hotelId, start, openReceive, command }: { t: T; lang: 
   const [fakeText, setFakeText] = useState('');
   const [heard, setHeard] = useState('');
   const [nudge, setNudge] = useState(false);
+  const [level, setLevel] = useState(0);
+  const [waiting, setWaiting] = useState(false);
+  const [retry, setRetry] = useState<string | null>(null);   // Google didn't answer: what the phone heard, for the retry card
+  const [draft, setDraft] = useState('');
+  useEffect(() => { if (fix) setDraft(fix.text); }, [fix?.n]);
+  const toldNoGuVoice = useRef(false);
+  const meter = useRef<{ ctx: AudioContext; raf: number } | null>(null);
+  const sideEar = useRef<Listener | null>(null);              // browser recognition running beside the recording, for "Heard:" and fallback
+  const sideHeard = useRef('');
+  const sayIn = (text: string, l: Lang) => {
+    if (l === 'gu' && !hasVoice('gu') && !toldNoGuVoice.current) { toldNoGuVoice.current = true; setMsg({ tone: 'warn', text: t.noGuVoice }); }
+    speak(text, l);
+  };
+  // After 3 s of waiting, the box says the app is still asking Google, so the screen never looks frozen.
+  useEffect(() => {
+    if (state !== 'uploading') { setWaiting(false); return; }
+    const id = window.setTimeout(() => setWaiting(true), 3000);
+    return () => clearTimeout(id);
+  }, [state]);
+  const stopMeter = () => { if (meter.current) { cancelAnimationFrame(meter.current.raf); meter.current.ctx.close().catch(() => {}); meter.current = null; } setLevel(0); };
+  const startMeter = (stream: MediaStream) => {
+    try {
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const an = ctx.createAnalyser(); an.fftSize = 512;
+      ctx.createMediaStreamSource(stream).connect(an);
+      const buf = new Uint8Array(an.fftSize);
+      const tick = () => {
+        an.getByteTimeDomainData(buf);
+        let sum = 0; for (let i = 0; i < buf.length; i += 4) { const v = (buf[i] - 128) / 128; sum += v * v; }
+        const rms = Math.sqrt(sum / (buf.length / 4));
+        setLevel(Math.min(1, Math.max(0, (20 * Math.log10(Math.max(rms, 1e-6)) + 50) / 45)));
+        if (meter.current) meter.current.raf = requestAnimationFrame(tick);
+      };
+      meter.current = { ctx, raf: requestAnimationFrame(tick) };
+    } catch { /* no meter on this browser */ }
+  };
   const fails = useRef(0);
   const ear = useRef<Listener | null>(null);
   const rec = useRef<MediaRecorder | null>(null);
@@ -117,11 +154,14 @@ function Voice({ t, lang, hotelId, start, openReceive, command }: { t: T; lang: 
   }, [state]);
 
   const handle = (p: any) => {
-    setQuery(null); setMsg(null);
+    setQuery(null); setMsg(null); setRetry(null);
+    const rl: Lang = p.detectedLanguage === 'gu-IN' ? 'gu' : p.detectedLanguage === 'hi-IN' ? 'hi' : p.detectedLanguage === 'en-IN' ? 'en' : lang;
+    const heardLang = p.detectedLanguage === 'mixed' ? 'mixed' : rl !== lang || p.detectedLanguage ? rl : undefined;
+    if (p.warnings?.includes('FALLBACK_RULES')) setMsg({ tone: 'warn', text: t.fromPhoneWords });
     if (p.status === 'QUERY_RESULT') {
       setQuery(p);
       const said = (p.queryResult ?? []).slice(0, 4).map((r: any) => `${r.name} ${r.store}`).join(', ');
-      if (said) speak(said, lang);
+      if (said) sayIn(said, rl);
       return;
     }
     if (p.action === 'TRANSFER_RECEIPT' || p.action === 'SHOW_TRANSFERS') { openReceive(); return; }
@@ -133,29 +173,40 @@ function Voice({ t, lang, hotelId, start, openReceive, command }: { t: T; lang: 
     fails.current = 0;
     const room = p.lines.find((l: any) => l.roomId);
     start(p.action as FlowKind, {
-      step: 'review', proposalId: p.proposalId, transcript: p.transcript, targetHotelId: p.targetHotelId,
+      step: 'review', proposalId: p.proposalId, transcript: p.transcript, heardLang, targetHotelId: p.targetHotelId,
       roomId: room?.roomId, roomNumber: room?.roomNumber,
       lines: p.lines.map((l: any) => ({ productId: l.productId, quantity: l.quantity, roomId: l.roomId, roomNumber: l.roomNumber, source: l.source, issues: l.issues, candidates: l.candidates, spoken: l.spokenProduct })),
     });
   };
-  const send = async (blob: Blob, durationMs: number, name = 'speech') => {
+  const send = async (blob: Blob, durationMs: number, name = 'speech', heardText = '') => {
     if (blob.type === 'text/plain') {
       const c = localCommand(await blob.text());
       if (c) { fails.current = 0; setState('idle'); command(c); return; }
     }
-    setState('uploading');
+    setState('uploading'); setRetry(null);
     const fd = new FormData();
     fd.append('hotelId', hotelId); fd.append('preferredLanguage', LANG_CODES[lang]); fd.append('durationMs', String(durationMs));
+    fd.append('client', 'web');
+    if (heardText) fd.append('heard', heardText.slice(0, 500));   // so the server can still answer if Google is slow
     fd.append('audio', blob, name);
     try { handle(await api('POST', '/voice/interpret', fd)); }
-    catch (e) { setMsg({ tone: 'bad', text: e instanceof ApiError && e.status >= 500 ? t.voiceFailed : errorText(e) }); }
+    catch (e) {
+      const slow = (e instanceof ApiError && e.status >= 500) || e instanceof NetworkError;
+      if (slow && blob.type !== 'text/plain') { setRetry(heardText); sayIn(t.googleSlow, lang); }
+      else setMsg({ tone: 'bad', text: slow ? t.voiceFailed : errorText(e) });
+    }
     finally { setState('idle'); }
   };
 
   // With no audio model configured, the phone's own speech recognition turns speech into text.
-  const useBrowserEar = me.config.voiceProvider === 'fake' && hasSpeechRecognition();
+  const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+  const useBrowserEar = (me.config.voiceProvider === 'fake' || (me.config.voiceProvider === 'gemini' && offline)) && hasSpeechRecognition();
   const onStart = async () => {
-    setMsg(null); setQuery(null); setHeard(''); want.current = 'hold';
+    setMsg(null); setQuery(null); setHeard(''); setRetry(null); want.current = 'hold';
+    if (me.config.voiceProvider === 'gemini' && offline) {
+      if (!hasSpeechRecognition()) { setNudge(true); setMsg({ tone: 'warn', text: t.offlineVoiceNone }); return; }
+      setMsg({ tone: 'warn', text: t.offlineVoice });
+    }
     if (useBrowserEar) {
       started.current = Date.now(); setState('recording');
       ear.current = recognize(lang, {
@@ -184,16 +235,26 @@ function Voice({ t, lang, hotelId, start, openReceive, command }: { t: T; lang: 
     r.ondataavailable = (e) => e.data.size && chunks.push(e.data);
     r.onstop = () => {
       stream.getTracks().forEach((x) => x.stop());
+      stopMeter();
       const dur = Date.now() - started.current;
+      const said = sideHeard.current; sideHeard.current = '';
       if (want.current === 'cancel' || dur < 600) { setState('idle'); return; }
-      send(new Blob(chunks, { type: (r.mimeType || 'audio/webm').split(';')[0] }), dur);
+      send(new Blob(chunks, { type: (r.mimeType || 'audio/webm').split(';')[0] }), dur, 'speech', said);
     };
     rec.current = r; started.current = Date.now();
     r.start(); setState('recording');
+    startMeter(stream);
+    // Beside the recording, the browser's own recognition shows words as they're heard (Google's version replaces them).
+    sideHeard.current = '';
+    if (hasSpeechRecognition()) {
+      try { sideEar.current = recognize(lang, { continuous: true, onInterim: (x) => { sideHeard.current = x; setHeard(x); }, onEnd: (x) => { if (x) sideHeard.current = x; sideEar.current = null; } }); }
+      catch { sideEar.current = null; }
+    }
   };
   const finish = (how: 'send' | 'cancel') => {
     want.current = how;
     if (ear.current) { how === 'send' ? ear.current.stop() : (ear.current.abort(), setState('idle')); }
+    if (sideEar.current) { how === 'send' ? sideEar.current.stop() : sideEar.current.abort(); }
     if (rec.current?.state === 'recording') rec.current.stop();
   };
   const live = state === 'recording' || state === 'asking';
@@ -212,6 +273,16 @@ function Voice({ t, lang, hotelId, start, openReceive, command }: { t: T; lang: 
         <ul>{t.voiceExamples.map((x) => <li key={x}>{x}</li>)}</ul>
       </details>
       {msg && <div className={`banner ${msg.tone}`} role="alert">{msg.text}</div>}
+      {retry !== null && (
+        <div className="banner warn retry-card" role="alert">
+          <b>{t.googleSlow}</b>
+          {retry && <div className="small muted">“{retry}”</div>}
+          <div className="row">
+            <button className="btn go" onClick={() => { setRetry(null); setMsg({ tone: 'warn', text: t.holdHint }); }}>🎤 {t.sayAgain}</button>
+            <button className="btn" onClick={() => { setDraft(retry); setRetry(null); }}>⌨️ {t.typeIt}</button>
+          </div>
+        </div>
+      )}
       {query && (
         <div className="panel">
           <table><thead><tr><th>{' '}</th><th className="num">Store</th><th className="num">Staff</th></tr></thead>
@@ -222,8 +293,8 @@ function Voice({ t, lang, hotelId, start, openReceive, command }: { t: T; lang: 
       {!disabled && (
         <Composer docked placeholder={t.typeHere}
           labels={{ hold: t.holdToTalk, slide: t.slideToCancel, releaseCancel: t.releaseToCancel, send: t.send }}
-          onText={typed}
-          voice={{ available: canVoice, live, startedAt: started.current, interim: heard, busy: state === 'uploading',
+          onText={typed} draft={draft} onDraft={setDraft}
+          voice={{ available: canVoice, live, startedAt: started.current, interim: heard, busy: state === 'uploading', waiting: waiting ? t.stillAsking : undefined, level,
             onStart, onSend: () => finish('send'), onCancel: () => finish('cancel'),
             onTap: () => setMsg({ tone: 'warn', text: t.holdHint }), onUnavailable: () => { setNudge(true); setMsg({ tone: 'warn', text: t.voiceUnavailable }); } }} />
       )}

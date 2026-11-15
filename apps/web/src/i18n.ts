@@ -36,6 +36,10 @@ const en = {
   recent: 'Recent', noRecent: 'Nothing recorded yet today.', signOut: 'Sign out', language: 'Language',
   micDenied: 'The microphone is blocked. Allow it in the browser, or tap what you did below.',
   voiceFailed: 'Could not understand. Try again, or tap what you did below.',
+  stillAsking: 'Still asking Google…', googleSlow: 'Google didn’t answer in time.', sayAgain: 'Say it again', typeIt: 'Type it', tapToFix: 'Tap to correct',
+  fromPhoneWords: 'Google was slow, so this is from what the phone heard. Check it.', noGuVoice: 'This phone has no Gujarati voice, so replies are read in Hindi.',
+  offlineVoice: 'No signal. The phone will listen by itself; keep sentences short.', offlineVoiceNone: 'No signal, and this phone can’t listen by itself. Tap the buttons until you’re back online.',
+  langTags: { gu: 'ગુજરાતી', hi: 'हिंदी', en: 'English', mixed: 'Mixed' } as Record<string, string>,
   offlineSaved: 'No connection. Saved on this phone — tap Retry when online.',
   notSubmitted: 'Not sent yet', retry: 'Retry', discard: 'Discard',
   pleaseCheck: 'Please check', reference: 'Reference',
@@ -85,6 +89,10 @@ const gu: Dict = {
   recent: 'તાજેતરનું', noRecent: 'હજી કંઈ નોંધાયું નથી.', signOut: 'સાઇન આઉટ', language: 'ભાષા',
   micDenied: 'માઇક બંધ છે. બ્રાઉઝરમાં મંજૂરી આપો, અથવા નીચે પસંદ કરો.',
   voiceFailed: 'સમજાયું નહીં. ફરી બોલો, અથવા નીચે પસંદ કરો.',
+  stillAsking: 'હજુ Google ને પૂછી રહ્યા છીએ…', googleSlow: 'Google એ સમયસર જવાબ ન આપ્યો.', sayAgain: 'ફરી બોલો', typeIt: 'લખો', tapToFix: 'સુધારવા દબાવો',
+  fromPhoneWords: 'Google ધીમું હતું, એટલે આ ફોને જે સાંભળ્યું તેના પરથી છે. ચકાસો.', noGuVoice: 'આ ફોનમાં ગુજરાતી અવાજ નથી, એટલે જવાબ હિન્દીમાં વંચાશે.',
+  offlineVoice: 'સિગ્નલ નથી. ફોન જાતે સાંભળશે; વાક્યો ટૂંકાં રાખો.', offlineVoiceNone: 'સિગ્નલ નથી, અને આ ફોન જાતે સાંભળી શકતો નથી. ઓનલાઇન થાઓ ત્યાં સુધી બટન દબાવો.',
+  langTags: { gu: 'ગુજરાતી', hi: 'हिंदी', en: 'English', mixed: 'મિશ્ર' },
   offlineSaved: 'નેટવર્ક નથી. ફોનમાં સાચવ્યું — નેટ આવે ત્યારે ફરી પ્રયાસ દબાવો.',
   notSubmitted: 'હજી મોકલાયું નથી', retry: 'ફરી પ્રયાસ', discard: 'કાઢી નાખો',
   pleaseCheck: 'કૃપા કરી તપાસો', reference: 'સંદર્ભ',
@@ -133,6 +141,10 @@ const hi: Dict = {
   recent: 'हाल का', noRecent: 'अभी कुछ दर्ज नहीं हुआ।', signOut: 'साइन आउट', language: 'भाषा',
   micDenied: 'माइक बंद है। ब्राउज़र में अनुमति दें, या नीचे चुनें।',
   voiceFailed: 'समझ नहीं आया। फिर बोलें, या नीचे चुनें।',
+  stillAsking: 'अभी भी Google से पूछ रहे हैं…', googleSlow: 'Google ने समय पर जवाब नहीं दिया।', sayAgain: 'फिर से बोलें', typeIt: 'लिख दें', tapToFix: 'सुधारने के लिए दबाएँ',
+  fromPhoneWords: 'Google धीमा था, इसलिए यह फ़ोन ने जो सुना उससे है। जाँच लें।', noGuVoice: 'इस फ़ोन में गुजराती आवाज़ नहीं है, इसलिए जवाब हिंदी में पढ़े जाएँगे।',
+  offlineVoice: 'सिग्नल नहीं है। फ़ोन खुद सुनेगा; वाक्य छोटे रखें।', offlineVoiceNone: 'सिग्नल नहीं है, और यह फ़ोन खुद नहीं सुन सकता। ऑनलाइन होने तक बटन दबाएँ।',
+  langTags: { gu: 'ગુજરાતી', hi: 'हिंदी', en: 'English', mixed: 'मिश्रित' },
   offlineSaved: 'नेटवर्क नहीं है। फ़ोन में सहेजा — नेट आने पर फिर कोशिश दबाएं।',
   notSubmitted: 'अभी भेजा नहीं गया', retry: 'फिर कोशिश', discard: 'हटा दें',
   pleaseCheck: 'कृपया जाँचें', reference: 'संदर्भ',
@@ -150,15 +162,20 @@ export const LANG_NAMES: Record<Lang, string> = { en: 'English', hi: 'हिन�
 export const LANG_CODES: Record<Lang, string> = { en: 'en-IN', hi: 'hi-IN', gu: 'gu-IN' };
 export type T = Dict;
 
-/** Read text aloud in the staff member's language when the phone has a voice for it. */
+/** Whether this phone can read aloud in the language. */
+export function hasVoice(lang: Lang) {
+  try { return !!window.speechSynthesis?.getVoices().some((x) => x.lang?.toLowerCase().startsWith(lang)); } catch { return false; }
+}
+/** Read text aloud in the language asked for; without a voice for it (common for Gujarati), Hindi, then English. */
 export function speak(text: string, lang: Lang) {
   try {
     const synth = window.speechSynthesis;
     if (!synth) return false;
     synth.cancel();
     const u = new SpeechSynthesisUtterance(text);
-    u.lang = LANG_CODES[lang];
-    const v = synth.getVoices().find((x) => x.lang?.toLowerCase().startsWith(LANG_CODES[lang].slice(0, 2)));
+    const pick: Lang = ([lang, 'hi', 'en'] as Lang[]).find(hasVoice) ?? lang;
+    u.lang = LANG_CODES[pick];
+    const v = synth.getVoices().find((x) => x.lang?.toLowerCase().startsWith(pick));
     if (v) u.voice = v;
     u.rate = 0.95;
     synth.speak(u);

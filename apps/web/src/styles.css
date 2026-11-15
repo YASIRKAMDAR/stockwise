@@ -366,3 +366,14 @@ tr.justheard td { background: #E3F5EC; transition: background .6s; }
 
 .cansay { margin-top: -6px; color: var(--ink-2); } .cansay summary { cursor: pointer; font-weight: 600; padding: 4px 2px; }
 .cansay ul { margin: 6px 0 0; padding-left: 20px; } .cansay li { margin: 4px 0; font-size: .98rem; }
+
+/* Voice level meter in the composer */
+.levelmeter { display: inline-flex; align-items: center; gap: 2px; height: 22px; width: 26px; }
+.levelmeter i { display: block; width: 4px; border-radius: 2px; background: var(--brick); opacity: .25; transition: opacity .08s; }
+.levelmeter i.on { opacity: 1; }
+.composer-listen.wait { border-color: var(--line-2); color: var(--ink-2); }
+.lang-tag { display: inline-block; font-size: .72rem; font-weight: 600; color: var(--indigo); background: var(--indigo-wash, #eef0fb); border-radius: 10px; padding: 1px 7px; margin-left: 6px; vertical-align: middle; }
+.heard-line { cursor: pointer; }
+.heard-line .fix { color: var(--ink-3); font-size: .75rem; margin-left: 6px; }
+.retry-card .row { display: flex; gap: 10px; margin-top: 8px; }
+.retry-card .row .btn { flex: 1; }

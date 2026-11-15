@@ -21,7 +21,7 @@ export interface FlowState {
   roomId?: string | null; roomNumber?: string | null;
   targetHotelId?: string | null;
   lines: Line[];
-  proposalId?: string; transcript?: string;
+  proposalId?: string; transcript?: string; heardLang?: string;
   ref?: string;
 }
 
@@ -136,7 +136,7 @@ function ProductTiles({ kind, lang, t, cart, setCart, data, single }: {
 }
 
 // ---------- The flow ----------
-export function Flow({ init, hotelId, lang, t, onExit }: { init: FlowState; hotelId: string; lang: Lang; t: T; onExit: () => void }) {
+export function Flow({ init, hotelId, lang, t, onExit, onFix }: { init: FlowState; hotelId: string; lang: Lang; t: T; onExit: () => void; onFix?: (text: string) => void }) {
   const { me } = useMe();
   const qc = useQueryClient();
   const data = useFlowData(hotelId);
@@ -328,7 +328,13 @@ export function Flow({ init, hotelId, lang, t, onExit }: { init: FlowState; hote
           <p className="summary-sentence">{sentence}</p>
           <button className="btn quiet" onClick={listen} aria-label={t.listen}><IconSpeaker /></button>
         </div>
-        {s.transcript && <p className="small muted">{t.heard}: “{s.transcript}”</p>}
+        {s.transcript && (
+          <p className="small muted heard-line" onClick={() => onFix?.(s.transcript!)} role={onFix ? 'button' : undefined} title={t.tapToFix}>
+            {t.heard}: “{s.transcript}”
+            {s.heardLang && t.langTags[s.heardLang] && <span className="lang-tag">{t.langTags[s.heardLang]}</span>}
+            {onFix && <span className="fix">✎ {t.tapToFix}</span>}
+          </p>
+        )}
         {s.kind === 'TRANSFER_DISPATCH' && !s.targetHotelId && (
           <div className="chips">{data.dests.filter((d) => d.id !== hotelId).map((d) => <button key={d.id} className="chip" onClick={() => setS((x) => ({ ...x, targetHotelId: d.id }))}>{d.name}</button>)}</div>
         )}

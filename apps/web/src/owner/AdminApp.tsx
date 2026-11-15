@@ -397,9 +397,11 @@ export function ReverseModal({ e, onClose }: { e: any; onClose: () => void }) {
 function Reports({ hotel }: { hotel: string }) {
   const { me } = useMe();
   const usage = useQuery<any>({ queryKey: ['voice-usage'], queryFn: () => get('/dashboard/voice-usage'), enabled: me.role === 'OWNER' });
+  const health = useQuery<any>({ queryKey: ['voice-health'], queryFn: () => get('/dashboard/voice-health?days=7'), enabled: me.role === 'OWNER', refetchInterval: 60_000 });
   return (
     <>
       <h1>Reports</h1>
+      {me.role === 'OWNER' && <VoiceHealth h={health.data} />}
       <div className="card stack"><h2>Exports (CSV)</h2>
         <div className="row"><button className="btn" onClick={() => downloadUrl(`/reports/stock-events.csv?hotelId=${hotel}`)}>Stock activity</button>
           <button className="btn" onClick={() => downloadUrl(`/reports/counts.csv?hotelId=${hotel}`)}>Count history</button></div>
@@ -414,5 +416,47 @@ function Reports({ hotel }: { hotel: string }) {
         </div>
       )}
     </>
+  );
+}
+
+/** Is voice working? Success rate and speed over the last 7 days, by language and by app, plus the latest attempts. */
+function VoiceHealth({ h }: { h: any }) {
+  if (!h) return null;
+  const tot = h.total ?? {};
+  const rate = tot.attempts ? Math.round(((tot.success + tot.ambiguous) / tot.attempts) * 100) : null;
+  const tone = rate === null ? '' : rate >= 95 && tot.p95_ms <= 4000 ? 'ok' : rate >= 85 ? 'warn' : 'bad';
+  const secs = (ms: number) => (ms / 1000).toFixed(1) + 's';
+  const Row = ({ r, label }: { r: any; label: string }) => (
+    <tr><td>{label}</td><td className="num">{r.attempts}</td><td className="num">{r.attempts ? Math.round(((r.success + r.ambiguous) / r.attempts) * 100) + '%' : '–'}</td>
+      <td className="num">{r.failed}</td><td className="num">{r.fallback}</td><td className="num">{secs(r.p50_ms)}</td><td className="num">{secs(r.p95_ms)}</td></tr>
+  );
+  const langName: Record<string, string> = { 'gu-IN': 'Gujarati', 'hi-IN': 'Hindi', 'en-IN': 'English', mixed: 'Mixed', unknown: 'Unknown' };
+  return (
+    <div className="card stack">
+      <div className="row spread"><h2>Voice health (last {h.days} days)</h2><span className="small muted">{h.provider} · {h.model}</span></div>
+      {!tot.attempts ? <div className="muted">No voice attempts yet.</div> : (
+        <>
+          <div className={`banner ${tone}`} style={{ fontSize: '1.05rem' }}>
+            <b>{rate}% answered</b> · typical {secs(tot.p50_ms)} · slowest 5% {secs(tot.p95_ms)} · {tot.failed} failed · {tot.fallback} answered from phone words
+            <div className="small" style={{ marginTop: 4 }}>Target: 95% answered, slowest 5% under 4 seconds.</div>
+          </div>
+          <div className="table-wrap"><table>
+            <thead><tr><th>By language / app</th><th className="num">Attempts</th><th className="num">Answered</th><th className="num">Failed</th><th className="num">Fallback</th><th className="num">Typical</th><th className="num">Slow 5%</th></tr></thead>
+            <tbody>
+              {h.byLanguage.map((r: any) => <Row key={'l' + r.language} r={r} label={langName[r.language] ?? r.language} />)}
+              {h.byClient.map((r: any) => <Row key={'c' + r.client} r={r} label={r.client === 'ios' ? 'iPhone app' : r.client === 'android' ? 'Android app' : r.client === 'web' ? 'Website' : 'Older app'} />)}
+            </tbody></table></div>
+          <details className="small"><summary>Last {h.recent.length} attempts</summary>
+            <div className="table-wrap"><table>
+              <thead><tr><th>When</th><th>Who</th><th>Heard</th><th>Language</th><th>App</th><th className="num">Secs</th><th>Result</th></tr></thead>
+              <tbody>{h.recent.map((r: any, i: number) => (
+                <tr key={i}><td>{new Date(r.created_at).toLocaleString()}</td><td>{r.user}</td><td style={{ maxWidth: 260 }}>{r.transcript ?? <span className="muted">–</span>}</td>
+                  <td>{langName[r.language] ?? r.language ?? '–'}</td><td>{r.client ?? '–'}{r.input_kind === 'text' ? ' (typed)' : ''}</td><td className="num">{secs(r.latency_ms)}</td>
+                  <td>{r.status === 'FAILED' ? <span style={{ color: 'var(--brick)' }}>Failed {r.error_code ? `(${r.error_code})` : ''}</span> : r.fallback ? 'From phone words' : r.confirmed ? 'Confirmed' : r.status === 'AMBIGUOUS' ? 'Needed help' : r.action}</td></tr>
+              ))}</tbody></table></div>
+          </details>
+        </>
+      )}
+    </div>
   );
 }
