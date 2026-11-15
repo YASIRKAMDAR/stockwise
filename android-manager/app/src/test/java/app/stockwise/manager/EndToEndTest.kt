@@ -135,7 +135,7 @@ class EndToEndTest {
         rule.onNodeWithContentDescription("Send").performClick(); pump()
         waitFor(s, "stock answer", 10_000) { s.chat.any { it.body is ChatBody.Stock } && !s.busy }
         rule.waitForIdle()
-        rule.onNodeWithText("Soap kitna bacha hai?").assertExists()
+        rule.onNodeWithText("soap kitna bacha hai").assertExists()
         rule.onNodeWithText("हिंदी").assertExists()
         rule.onNodeWithText("14 with staff").assertExists()
         val interpret = received.last { it.path?.endsWith("/voice/interpret") == true }

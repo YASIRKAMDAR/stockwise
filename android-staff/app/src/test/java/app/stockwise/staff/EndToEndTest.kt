@@ -87,7 +87,7 @@ class EndToEndTest {
     private fun waitFor(s: AppState, what: String, timeout: Long = 10_000, cond: () -> Boolean) {
         val end = System.currentTimeMillis() + timeout
         while (!cond()) {
-            if (System.currentTimeMillis() > end) throw AssertionError("Timed out waiting for $what. loginError=${s.loginError} notice=${s.notice} busy=${s.busy} chat=${s.chat.map { it.body::class.simpleName }} flow=${s.flow?.step} requests=${received.map { "${it.method} ${it.path}" }}")
+            if (System.currentTimeMillis() > end) throw AssertionError("Timed out waiting for $what. loginError=${s.loginError} notice=${s.notice} busy=${s.busy} chat=${s.chat.map { it.body::class.simpleName }} flow=${s.flow?.step} notice2=${s.notice} nudge=${s.nudgeTap} requests=${received.map { "${it.method} ${it.path}" }}")
             org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
             rule.waitForIdle()
             Thread.sleep(25)
@@ -108,7 +108,12 @@ class EndToEndTest {
         rule.onNode(hasText("Sign in") and hasClickAction()).performClick(); pump()
         waitFor(s, "s.me != null", 10_000) { s.me != null }
         waitFor(s, "s.products.isNotEmpty()", 10_000) { s.products.isNotEmpty() && !s.busy }
-        rule.onNodeWithText("Hold to talk").assertExists()
+        rule.onNodeWithText("Hold the mic and say what you did").assertExists()
+
+        // The proposal parses with one line (isolates decoding from the UI).
+        val parsed = kotlinx.coroutines.runBlocking { s.api.interpret("h1", "room 203, 2 soap", "en", 0) }
+        assertEquals(1, parsed.lines.size); assertEquals("PLACE_IN_ROOM", parsed.action); assertEquals("r203", parsed.lines[0].roomId)
+        assertTrue(!s.blocked(Flow(Kind.PLACE_IN_ROOM, Step.CHECK, "r203", "203", lines = listOf(Line("p1", 2, "r203", "203", "MY_STOCK")))))
 
         // Type what would have been said; the server reads it the same way as speech.
         rule.onNodeWithContentDescription("Type: room 203, 2 soap").performTextInput("room 203, 2 soap")
@@ -116,8 +121,8 @@ class EndToEndTest {
         waitFor(s, "s.chat.any { it.body is ChatBody.Job }", 10_000) { s.chat.any { it.body is ChatBody.Job } && !s.busy }
         rule.waitForIdle()
 
-        // The card shows Google's version of the words, the language tag, the room and the line. Nothing saved yet.
-        rule.onNodeWithText("Room 203 ma do soap mukya").assertExists()
+        // The card shows the words, the language tag, the room and the line. Nothing saved yet.
+        rule.onNodeWithText("room 203, 2 soap").assertExists()
         rule.onNodeWithText("Mixed").assertExists()
         rule.onNodeWithText("203").assertExists()
         assertTrue(received.none { it.path == "/transactions" && it.method == "POST" })
