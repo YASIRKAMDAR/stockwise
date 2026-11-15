@@ -1,0 +1,213 @@
+import AVFoundation
+import Foundation
+import Speech
+
+/// Microphone, speech-to-text and read-aloud. The real one uses the iPhone's own speech recognition; tests use a fake.
+protocol Mic: AnyObject {
+    func available(lang: String) -> Bool
+    func hasPermission() -> Bool
+    func hasRecordPermission() -> Bool
+    func requestPermission(_ done: @escaping (Bool) -> Void)
+    /// record: also keep the recording (for Google's model). onDone: nil = cancelled, "" = no words heard,
+    /// otherwise the words the phone heard. Always called on the main thread.
+    func start(lang: String, record: Bool, onInterim: @escaping (String) -> Void, onLevel: @escaping (Float) -> Void, onDone: @escaping (String?) -> Void)
+    func stopTalking()
+    func cancel()
+    /// The last recording (m4a), once; nil when cancelled or not recording.
+    func takeRecording() -> Data?
+    func say(_ text: String, lang: String)
+    /// Whether this iPhone can read aloud in the language.
+    func hasVoice(lang: String) -> Bool
+}
+extension Mic {
+    func start(lang: String, onInterim: @escaping (String) -> Void, onDone: @escaping (String?) -> Void) {
+        start(lang: lang, record: false, onInterim: onInterim, onLevel: { _ in }, onDone: onDone)
+    }
+}
+
+/// Hold-to-talk: Apple's recognizer shows the words live; when recording, the audio is also saved so
+/// Google's model can understand mixed Gujarati, Hindi and English.
+final class SpeechMic: NSObject, Mic {
+    private let engine = AVAudioEngine()
+    private var request: SFSpeechAudioBufferRecognitionRequest?
+    private var task: SFSpeechRecognitionTask?
+    private var onDone: ((String?) -> Void)?
+    private var latest = ""
+    private var cancelled = false
+    private var finished = true
+    private var recording = false
+    /// The recording is shared with the audio thread; closing it under the lock writes the file's index so it can be played back.
+    private final class Recording {
+        private let lock = NSLock()
+        private var file: AVAudioFile?
+        func open(_ f: AVAudioFile?) { lock.lock(); file = f; lock.unlock() }
+        func write(_ b: AVAudioPCMBuffer) { lock.lock(); try? file?.write(from: b); lock.unlock() }
+        func close() { lock.lock(); file = nil; lock.unlock() }
+    }
+    private let rec = Recording()
+    private var fileURL: URL?
+    private var recorded: Data?
+    private var generation = 0
+    private let synth = AVSpeechSynthesizer()
+
+    func available(lang: String) -> Bool {
+        SFSpeechRecognizer(locale: Locale(identifier: localeTag(lang)))?.isAvailable ?? false
+    }
+    func hasPermission() -> Bool {
+        SFSpeechRecognizer.authorizationStatus() == .authorized && hasRecordPermission()
+    }
+    func hasRecordPermission() -> Bool { AVAudioSession.sharedInstance().recordPermission == .granted }
+    func requestPermission(_ done: @escaping (Bool) -> Void) {
+        SFSpeechRecognizer.requestAuthorization { status in
+            AVAudioSession.sharedInstance().requestRecordPermission { granted in
+                DispatchQueue.main.async { done(granted) }
+            }
+        }
+    }
+
+    func start(lang: String, record: Bool, onInterim: @escaping (String) -> Void, onLevel: @escaping (Float) -> Void, onDone: @escaping (String?) -> Void) {
+        stopAudio()
+        task?.cancel(); task = nil
+        synth.stopSpeaking(at: .immediate)
+        generation += 1
+        let gen = generation
+        self.onDone = onDone
+        latest = ""; cancelled = false; finished = false
+        recording = record; recorded = nil; rec.close(); fileURL = nil
+        let recognizer = SFSpeechRecognizer(locale: Locale(identifier: localeTag(lang)))
+        let canRecognize = (recognizer?.isAvailable ?? false) && SFSpeechRecognizer.authorizationStatus() == .authorized
+        if !canRecognize && !record { finish(gen); return }
+        let req: SFSpeechAudioBufferRecognitionRequest? = canRecognize ? SFSpeechAudioBufferRecognitionRequest() : nil
+        req?.shouldReportPartialResults = true
+        request = req
+        do {
+            let audio = AVAudioSession.sharedInstance()
+            try audio.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .duckOthers])
+            try audio.setActive(true, options: .notifyOthersOnDeactivation)
+            let input = engine.inputNode
+            let format = input.outputFormat(forBus: 0)
+            if format.sampleRate == 0 || format.channelCount == 0 { finish(gen); return }
+            if record {
+                let url = FileManager.default.temporaryDirectory.appendingPathComponent("stockwise-voice.m4a")
+                try? FileManager.default.removeItem(at: url)
+                let settings: [String: Any] = [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: format.sampleRate,
+                                               AVNumberOfChannelsKey: format.channelCount, AVEncoderBitRateKey: 48000]
+                rec.open(try? AVAudioFile(forWriting: url, settings: settings, commonFormat: format.commonFormat, interleaved: format.isInterleaved))
+                fileURL = url
+            }
+            input.removeTap(onBus: 0)
+            let rec = self.rec
+            var lastLevelAt = Date.distantPast
+            input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+                req?.append(buffer)
+                if record { rec.write(buffer) }
+                // Loudness ~12 times a second, so the bar moves while the staff member speaks.
+                if Date().timeIntervalSince(lastLevelAt) > 0.08, let ch = buffer.floatChannelData?[0] {
+                    lastLevelAt = Date()
+                    let n = Int(buffer.frameLength)
+                    var sum: Float = 0
+                    for i in stride(from: 0, to: n, by: 4) { sum += ch[i] * ch[i] }
+                    let rms = sqrtf(sum / Float(max(1, n / 4)))
+                    let level = min(1, max(0, (20 * log10f(max(rms, 1e-6)) + 50) / 45))   // -50 dB … -5 dB → 0 … 1
+                    DispatchQueue.main.async { onLevel(level) }
+                }
+            }
+            engine.prepare()
+            try engine.start()
+        } catch { finish(gen); return }
+        if let recognizer = recognizer, let req = req {
+            task = recognizer.recognitionTask(with: req) { [weak self] result, error in
+                let text = result?.bestTranscription.formattedString
+                let isFinal = result?.isFinal ?? false
+                let failed = error != nil
+                DispatchQueue.main.async {
+                    guard let self = self, self.generation == gen, !self.finished else { return }
+                    if let text = text { self.latest = text; onInterim(text) }
+                    // While recording for Google, keep going until the mic is released.
+                    if (isFinal || failed) && !self.recording { self.finish(gen) }
+                }
+            }
+        }
+    }
+
+    /// Mic released: stop listening and hand over what was heard.
+    func stopTalking() {
+        guard !finished else { return }
+        let gen = generation
+        stopAudio()
+        request?.endAudio()
+        // No live recognizer (e.g. Gujarati on iPhone) and nothing to record: done now.
+        if task == nil && !recording { finish(gen); return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + (recording ? 0.6 : 1.5)) { [weak self] in self?.finish(gen) }
+    }
+
+    func cancel() {
+        guard !finished else { return }
+        cancelled = true
+        task?.cancel()
+        finish(generation)
+    }
+
+    func takeRecording() -> Data? {
+        defer { recorded = nil }
+        return recorded
+    }
+
+    private func finish(_ gen: Int) {
+        guard gen == generation, !finished else { return }
+        finished = true
+        stopAudio()
+        if recording { task?.cancel() }
+        task = nil; request = nil
+        rec.close()   // finishes the m4a so Google can read it
+        if recording, !cancelled, let url = fileURL { recorded = try? Data(contentsOf: url) }
+        if let url = fileURL { try? FileManager.default.removeItem(at: url) }
+        fileURL = nil
+        let done = onDone
+        onDone = nil
+        done?(cancelled ? nil : latest.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    private func stopAudio() {
+        if engine.isRunning { engine.stop() }
+        engine.inputNode.removeTap(onBus: 0)
+    }
+
+    func hasVoice(lang: String) -> Bool { AVSpeechSynthesisVoice(language: localeTag(lang)) != nil }
+    /// Reads aloud in the language asked for; if the iPhone has no voice for it (common for Gujarati), Hindi, then English.
+    func say(_ text: String, lang: String) {
+        let voice = AVSpeechSynthesisVoice(language: localeTag(lang)) ?? AVSpeechSynthesisVoice(language: "hi-IN") ?? AVSpeechSynthesisVoice(language: "en-IN")
+        guard let voice = voice else { return }
+        let u = AVSpeechUtterance(string: text)
+        u.voice = voice
+        synth.stopSpeaking(at: .immediate)
+        synth.speak(u)
+    }
+}
+
+private let yesWords: Set<String> = ["haan", "han", "ha", "haa", "yes", "yeah", "ok", "okay", "theek", "thik", "sahi", "हाँ", "हां", "हा", "ठीक", "सही", "ओके", "હા", "હાં", "બરાબર", "ઓકે", "સાચું"]
+private let noWords: Set<String> = ["nahi", "nahin", "na", "no", "nope", "cancel", "नहीं", "नही", "ना", "ના", "નહીં", "નથી"]
+/// true = yes, false = no, nil = neither.
+func yesNo(_ text: String) -> Bool? {
+    let words = text.lowercased().components(separatedBy: CharacterSet(charactersIn: " ,.!?।\n"))
+    if words.contains(where: { noWords.contains($0) }) { return false }
+    if words.contains(where: { yesWords.contains($0) }) { return true }
+    return nil
+}
+
+/// Short spoken or typed commands the app handles itself: "my bag", "history", "home", "sign out", a language name.
+enum LocalCommand: Equatable { case go(AppTab), language(String), signOut }
+/// Short spoken commands handled on the phone, no server round trip.
+func localCommand(_ text: String) -> LocalCommand? {
+    let t = text.lowercased()
+    if t.range(of: #"(sign|log) ?out|साइन ?आउट|સાઇન ?આઉટ|bahar niklo"#, options: .regularExpression) != nil { return .signOut }
+    if t.range(of: #"\b(gujarati|ગુજરાતી|गुजराती)\b"#, options: .regularExpression) != nil { return .language("gu") }
+    if t.range(of: #"\b(hindi|हिंदी|હિન્દી|हिन्दी)\b"#, options: .regularExpression) != nil { return .language("hi") }
+    if t.range(of: #"\b(english|अंग्रेज़ी|અંગ્રેજી|angrezi)\b"#, options: .regularExpression) != nil { return .language("en") }
+    if t.range(of: #"(open|show|dikhao|બતાવ|दिखा).{0,12}(count|ginti|गिनती|ગણતરી)|^(count|ginti|गिनती|ગણતરી)$"#, options: .regularExpression) != nil { return .go(.count) }
+    if t.range(of: #"(deliver|transfer|ट्रांसफर|ટ્રાન્સફર|डिलीवरी|ડિલિવરી)"#, options: .regularExpression) != nil && t.range(of: #"(open|show|dikhao|બતાવ|दिखा|list)"#, options: .regularExpression) != nil { return .go(.deliveries) }
+    if t.range(of: #"^(activity|history|changes|badlav|बदलाव|ફેરફાર|इतिहास|ઇતિહાસ)$|(show|dikhao|બતાવ|दिखा).{0,10}(activity|history|changes|बदलाव|ફેરફાર)"#, options: .regularExpression) != nil { return .go(.activity) }
+    if t.range(of: #"^(stock|स्टॉक|સ્ટોક)$|(show|dikhao|બતાવ|दिखा).{0,10}(stock|स्टॉक|સ્ટોક)$"#, options: .regularExpression) != nil { return .go(.stock) }
+    if t.range(of: #"^(home|today|aaj|आज|આજ|होम|હોમ)$"#, options: .regularExpression) != nil { return .go(.today) }
+    return nil
+}

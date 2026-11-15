@@ -1,0 +1,30 @@
+name: iPhone manager project (ready to open in Xcode)
+
+on:
+  push:
+    branches: [main]
+    paths: ['ios-manager/**', '.github/workflows/ios-project.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Generate the Xcode project and zip it
+        run: |
+          brew install xcodegen
+          cd ios-manager && xcodegen generate
+          cd .. && mv ios-manager StockwiseManager-iOS && zip -qr StockwiseManager-iOS.zip StockwiseManager-iOS -x '*/build/*'
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: manager-ios-project
+          name: Stockwise Manager (iPhone) Xcode project
+          prerelease: true
+          make_latest: false
+          files: StockwiseManager-iOS.zip
+          body: Open StockwiseManager.xcodeproj in Xcode and press Run. Rebuilt on every change to the iPhone manager app.

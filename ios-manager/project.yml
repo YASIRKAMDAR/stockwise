@@ -1,0 +1,48 @@
+name: StockwiseManager
+options:
+  bundleIdPrefix: app.stockwise
+  deploymentTarget:
+    iOS: "16.4"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  StockwiseManager:
+    type: application
+    platform: iOS
+    sources: [Sources]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.stockwise.manager
+        PRODUCT_NAME: StockwiseManager
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Stockwise Manager
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: "Stockwise listens while you hold the mic, to hear your question or count."
+        INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: "Stockwise turns what you say into the question or count."
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        INFOPLIST_KEY_UIUserInterfaceStyle: Light
+  StockwiseManagerTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [Tests]
+    dependencies:
+      - target: StockwiseManager
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.stockwise.manager.tests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/StockwiseManager.app/StockwiseManager"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+schemes:
+  StockwiseManager:
+    build:
+      targets:
+        StockwiseManager: all
+        StockwiseManagerTests: [test]
+    test:
+      targets: [StockwiseManagerTests]
