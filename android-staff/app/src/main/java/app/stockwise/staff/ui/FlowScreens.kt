@@ -172,7 +172,7 @@ private fun CheckStep(s: AppState, f: Flow, mic: Mic) {
                 .holdToTalk(onStart = {
                     if (!mic.hasPermission()) { mic.requestPermission(); return@holdToTalk }
                     hearing = true
-                    mic.start(s.lang, false, {}) { text, _ -> hearing = false
+                    mic.start(s.lang, false, {}, {}) { text, _ -> hearing = false
                         when (text?.let { yesNo(it) }) { true -> { s.confirm() }; false -> { s.flow = null }; null -> {} } }
                 }, onSend = { mic.release() }, onCancel = { mic.cancel(); hearing = false }, onTap = { s.notice = Notice(t.holdHint) }),
                 contentAlignment = Alignment.Center) { Icon(Icons.Filled.Mic, t.holdYesNo, tint = if (hearing) Color.White else C.Ink) }
