@@ -105,6 +105,33 @@ final class ScreensTests: XCTestCase {
     func test11History() throws { let s = state(); s.tab = .history; try shot("11-history", s) }
     func test12Gujarati() throws { let s = state(); s.lang = "gu"; try shot("12-home-gujarati", s) }
 
+    private func proposal(_ state: ChatState) -> ChatMessage {
+        ChatMessage(role: .app, body: .proposal(Flow(kind: .placeInRoom, step: .check, roomId: "r203", roomNumber: "203", lines: lines(), proposalId: "x"), state))
+    }
+    private func said(_ text: String, _ spoken: Bool = true) -> ChatMessage { ChatMessage(role: .me, body: .said(text, spoken: spoken)) }
+    func test13ChatCheck() throws {
+        let s = state()
+        s.chat = [said("Room 203, two soap and one shampoo"), proposal(.ready)]
+        try shot("13-chat-check", s)
+    }
+    func test14ChatSavedStockBag() throws {
+        let s = state()
+        s.chat = [said("Room 203, two soap and one shampoo"), proposal(.saved("DEFB28")),
+                  said("How many soap are left?"), ChatMessage(role: .app, body: .stock([QueryRow(productId: "p1", name: "Soap", store: 180)])),
+                  said("my bag", false), ChatMessage(role: .app, body: .bag([BagLine(name: "Soap", native: nil, emoji: "🧼", qty: 8), BagLine(name: "Shampoo", native: nil, emoji: "🧴", qty: 4)]))]
+        try shot("14-chat-saved-stock-bag", s)
+    }
+    func test15ChatListening() throws {
+        let s = state()
+        s.chat = [said("Room 203, two soap and one shampoo"), proposal(.saved("DEFB28"))]
+        s.voiceLive = true; s.voiceStartedAt = Date().addingTimeInterval(-2); s.voiceInterim = "Take ten soap from the"
+        try shot("15-chat-listening", s)
+    }
+    func test16ChatNotUnderstood() throws {
+        let s = state()
+        s.chat = [said("umm the thing"), ChatMessage(role: .app, body: .text(T(lang: "en").notUnderstood, warn: true))]
+        try shot("16-chat-not-understood", s)
+    }
     func testLocalCommands() {
         XCTAssertEqual(localCommand("my bag"), .go(.bag))
         XCTAssertEqual(localCommand("show history"), .go(.history))

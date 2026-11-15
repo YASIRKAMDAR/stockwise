@@ -54,6 +54,19 @@ struct T {
     var inBag: String { s("in your bag", "आपके बैग में", "તમારી બેગમાં") }
     var youCanSay: String { s("You can say", "आप बोल सकते हैं", "તમે બોલી શકો") }
     var examples: [String] { lang == "hi" ? ["“रूम 203 में दो साबुन रखे”", "“स्टोर से दस साबुन लिए”", "“तीन शैम्पू वापस”", "“बीस साबुन आए”", "“कितने साबुन बचे?”", "“मेरा बैग” · “इतिहास” · “साइन आउट”"] : lang == "gu" ? ["“રૂમ 203 માં બે સાબુ મૂક્યા”", "“સ્ટોરમાંથી દસ સાબુ લીધા”", "“ત્રણ શેમ્પૂ પરત”", "“વીસ સાબુ આવ્યા”", "“કેટલા સાબુ બચ્યા?”", "“મારી બેગ” · “ઇતિહાસ” · “સાઇન આઉટ”"] : ["“Put two soaps in room 203”", "“Take ten soap from the store”", "“Return three shampoo”", "“Twenty soap arrived”", "“How many soap are left?”", "“My bag” · “History” · “Sign out”"] }
+    var listening: String { s("Listening…", "सुन रहे हैं…", "સાંભળી રહ્યા છીએ…") }
+    var isThisRight: String { s("Is this right?", "क्या यह सही है?", "શું આ બરાબર છે?") }
+    var sayYes: String { s("Tap ✓, or hold the mic and say “yes”", "✓ दबाएँ, या माइक दबाकर “हाँ” बोलें", "✓ દબાવો, અથવા માઇક દબાવી “હા” બોલો") }
+    var edit: String { s("Edit", "बदलें", "બદલો") }
+    var cancelledText: String { s("Cancelled", "रद्द किया", "રદ કર્યું") }
+    var needsFix: String { s("Something needs choosing. Tap Edit.", "कुछ चुनना बाकी है। बदलें दबाएँ।", "કંઈક પસંદ કરવાનું બાકી છે. બદલો દબાવો.") }
+    var languageChanged: String { s("Language changed to English", "भाषा हिन्दी हो गई", "ભાષા ગુજરાતી થઈ") }
+    var openingHistory: String { s("Opening your history", "आपका इतिहास खोल रहे हैं", "તમારો ઇતિહાસ ખોલી રહ્યા છીએ") }
+    var newChat: String { s("Clear", "साफ़ करें", "સાફ કરો") }
+    var pickItems: String { s("pick the items", "सामान चुनें", "વસ્તુ પસંદ કરો") }
+    var noMatch: String { s("No matching stock.", "ऐसा कोई सामान नहीं मिला।", "આવો કોઈ સામાન મળ્યો નહીં.") }
+    var inYourBag: String { s("In your bag", "आपके बैग में", "તમારી બેગમાં") }
+    var tapToTry: String { s("Tap one to try it", "आज़माने के लिए एक दबाएँ", "અજમાવવા માટે એક દબાવો") }
     func act(_ k: Kind) -> (String, String) {
         switch k {
         case .placeInRoom: return (s("Put in room", "कमरे में रखा", "રૂમમાં મૂક્યું"), s("From your bag or the store", "बैग या स्टोर से", "બેગ કે સ્ટોરમાંથી"))

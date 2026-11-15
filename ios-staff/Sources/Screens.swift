@@ -156,64 +156,6 @@ struct MenuPanel: View {
     }
 }
 
-struct HomeScreen: View {
-    @EnvironmentObject var s: AppState
-    var body: some View {
-        let t = s.t
-        let waiting = s.outbox.filter { $0.error == nil }
-        let failed = s.outbox.filter { $0.error != nil }
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                Panel {
-                    HStack(spacing: 14) {
-                        Image(systemName: "mic.fill").font(.system(size: 22)).foregroundColor(C.ink)
-                            .frame(width: 52, height: 52).background(C.marigold).clipShape(Circle())
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(t.holdToTalk).font(.system(size: 17, weight: .semibold)).foregroundColor(C.ink)
-                            Text(t.example).font(.system(size: 15)).foregroundColor(C.ink2)
-                        }
-                    }
-                    Text(t.youCanSay).font(.system(size: 13, weight: .bold)).foregroundColor(C.ink2).padding(.top, 4)
-                    ForEach(Array(t.examples.dropFirst()), id: \.self) { e in Text(e).font(.system(size: 14)).foregroundColor(C.ink2) }
-                }
-                if !waiting.isEmpty {
-                    Panel(border: C.marigold, bg: C.marigoldWash) {
-                        Text("\(t.pending): \(waiting.count)").font(.system(size: 16, weight: .bold)).foregroundColor(C.amber)
-                        ForEach(waiting.prefix(3)) { p in Text(p.label).font(.system(size: 15)).foregroundColor(C.amber) }
-                        BigButton(title: t.sendNow, color: C.ink) { s.flushOutbox() }
-                    }
-                }
-                ForEach(failed) { p in
-                    Panel(border: C.brick) {
-                        Text(p.label).font(.system(size: 16, weight: .bold)).foregroundColor(C.ink)
-                        Text(p.error ?? "").font(.system(size: 15)).foregroundColor(C.brick)
-                        Button("OK") { s.discardPending(p.key) }.font(.system(size: 16, weight: .bold))
-                    }
-                }
-                if let n = s.notice { Banner(text: n.text, warn: n.warn) }
-                if let rows = s.answer {
-                    Panel {
-                        ForEach(Array(rows.enumerated()), id: \.offset) { _, r in
-                            HStack {
-                                Text(r.name).font(.system(size: 16, weight: .semibold)).foregroundColor(C.ink)
-                                Spacer()
-                                Text("\(t.store) \(r.store ?? 0)").foregroundColor(C.ink2)
-                                Text("👜 \(s.bag[r.productId] ?? 0)").foregroundColor(C.ink2)
-                            }
-                        }
-                    }
-                }
-                BigButton(title: t.tapInstead, color: C.ink, outline: !s.nudgeTap) { s.tapInstead() }
-                Text(t.orTap).font(.system(size: 15)).foregroundColor(C.ink2)
-                JobTile(kind: .placeInRoom, primary: true)
-                HStack(spacing: 10) { JobTile(kind: .checkoutToStaff); JobTile(kind: .returnToStore) }
-                JobTile(kind: .supplierReceipt)
-            }
-            .padding(16)
-        }
-    }
-}
-
 struct JobTile: View {
     @EnvironmentObject var s: AppState
     let kind: Kind

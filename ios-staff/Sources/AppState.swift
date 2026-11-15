@@ -1,6 +1,7 @@
 import Foundation
 import Network
 import SwiftUI
+import UIKit
 
 /// All app state. Screens read it and call its functions; it talks to the server.
 @MainActor
@@ -30,6 +31,8 @@ final class AppState: ObservableObject {
     @Published var voiceInterim = ""
     @Published var voiceStartedAt = Date()
     @Published var hearingYesNo = false
+    @Published var chat: [ChatMessage] = []
+    var editingChatId: UUID?
     private var misses = 0
     private var monitor: NWPathMonitor?
 
@@ -89,7 +92,7 @@ final class AppState: ObservableObject {
 
     func signOut() {
         menuOpen = false
-        Task { await api.logout(); me = nil; flow = nil; tab = .home; answer = nil; notice = nil }
+        Task { await api.logout(); me = nil; flow = nil; tab = .home; answer = nil; notice = nil; chat = [] }
     }
 
     func setLanguage(_ l: String) {
@@ -172,24 +175,46 @@ final class AppState: ObservableObject {
         if !mic.available(lang: lang) { nudgeTap = true }
     }
 
-    /// Text from the mic or the text box → the server works out the job → check screen.
+    // ---------- conversation ----------
+    func post(_ body: ChatBody, as role: ChatRole = .app) {
+        chat.append(ChatMessage(role: role, body: body))
+        if chat.count > 40 { chat.removeFirst(chat.count - 40) }
+    }
+    func clearChat() { chat = []; notice = nil; editingChatId = nil }
+    private func index(_ id: UUID) -> Int? { chat.firstIndex { $0.id == id } }
+    private var pendingProposalId: UUID? {
+        chat.last { m in if case .proposal(_, .ready) = m.body { return true }; return false }?.id
+    }
+    private func say(_ text: String) { if !text.isEmpty { mic.say(text, lang: lang) } }
+
+    /// Text from the mic or the text box appears as the staff member's message; the app answers below it.
     func interpret(_ text: String, durationMs: Int) {
         guard let h = hotelId else { return }
         notice = nil; answer = nil
+        post(.said(text, spoken: durationMs > 0), as: .me)
+        // A short "yes" / "no" answers the last question in the conversation.
+        if let pid = pendingProposalId, text.split(separator: " ").count <= 3, let yes = yesNo(text) {
+            if yes { confirmChat(pid) } else { cancelChat(pid) }
+            return
+        }
         if let c = localCommand(text) {
             misses = 0
             switch c {
-            case .go(let to):
-                go(to)
-                if to == .bag {
-                    let items = activeProducts.compactMap { p -> String? in
-                        guard let q = bag[p.id], q > 0 else { return nil }
-                        return "\(p.native(lang) ?? p.name) \(q)"
-                    }
-                    mic.say(items.isEmpty ? t.nothingInBag : items.joined(separator: ", "), lang: lang)
+            case .go(.bag):
+                let lines = activeProducts.compactMap { p -> BagLine? in
+                    guard let q = bag[p.id], q > 0 else { return nil }
+                    return BagLine(name: p.name, native: p.native(lang), emoji: p.emoji, qty: q)
                 }
-            case .language(let l): setLanguage(l)
-            case .signOut: signOut()
+                post(.bag(lines))
+                say(lines.isEmpty ? t.nothingInBag : lines.map { "\($0.native ?? $0.name) \($0.qty)" }.joined(separator: ", "))
+            case .go(.history):
+                post(.text(t.openingHistory, warn: false)); go(.history)
+            case .go(.home):
+                break
+            case .language(let l):
+                setLanguage(l); post(.text(t.languageChanged, warn: false)); say(t.languageChanged)
+            case .signOut:
+                signOut()
             }
             return
         }
@@ -200,7 +225,10 @@ final class AppState: ObservableObject {
                 let kind = Kind(rawValue: p.action)
                 let plines = p.lines ?? []
                 if p.status == "QUERY_RESULT" {
-                    answer = p.queryResult ?? []; misses = 0
+                    misses = 0
+                    let rows = p.queryResult ?? []
+                    post(.stock(rows))
+                    say(rows.prefix(4).map { "\($0.name) \($0.store ?? 0)" }.joined(separator: ", "))
                 } else if let kind = kind, !plines.isEmpty {
                     misses = 0
                     let place = kind == .placeInRoom
@@ -211,20 +239,56 @@ final class AppState: ObservableObject {
                         return Line(productId: l.productId, quantity: q, roomId: l.roomId, roomNumber: l.roomNumber, source: src, spoken: l.spokenProduct ?? "", issues: l.issues ?? [])
                     }
                     let room = lines.first { $0.roomId != nil }
-                    flow = Flow(kind: kind, step: .check, roomId: room?.roomId, roomNumber: room?.roomNumber, lines: lines, proposalId: p.proposalId, transcript: p.transcript)
+                    let f = Flow(kind: kind, step: .check, roomId: room?.roomId, roomNumber: room?.roomNumber, lines: lines, proposalId: p.proposalId, transcript: p.transcript)
+                    post(.proposal(f, .ready))
+                    say(spokenSummary(f))
                 } else if let kind = kind {
                     // "Take from store" with no items: open that job so they can pick the items.
-                    misses = 0; start(kind); mic.say(t.act(kind).0, lang: lang)
+                    misses = 0
+                    post(.text("\(t.act(kind).0) — \(t.pickItems)", warn: false))
+                    say(t.act(kind).0)
+                    start(kind)
                 } else { missed() }
             } catch let e as ApiError {
-                if e.status == 401 { api.clearSession(); me = nil } else { notice = Notice(text: e.message) }
-            } catch { notice = Notice(text: t.offlineLogin) }
+                if e.status == 401 { api.clearSession(); me = nil } else { post(.text(e.message, warn: true)) }
+            } catch { post(.text(t.offlineLogin, warn: true)) }
             busy = false
         }
     }
     func missed() {
         misses += 1; nudgeTap = true
-        if misses >= 2 { misses = 0; start(.placeInRoom); notice = Notice(text: t.twiceFailed) } else { notice = Notice(text: t.notUnderstood) }
+        if misses >= 2 { misses = 0; post(.text(t.twiceFailed, warn: true)); say(t.twiceFailed); start(.placeInRoom) }
+        else { post(.text(t.notUnderstood, warn: true)); say(t.notUnderstood) }
+    }
+
+    /// ✓ in the conversation, or saying "yes".
+    func confirmChat(_ id: UUID) {
+        guard let i = index(id), case .proposal(let f, .ready) = chat[i].body else { return }
+        if blocked(f) { editChat(id); return }
+        chat[i].body = .proposal(f, .saving)
+        Task {
+            let r = await save(f)
+            guard let i = index(id) else { return }
+            switch r {
+            case .saved(let ref):
+                chat[i].body = .proposal(f, .saved(ref)); say(t.saved)
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+            case .offline:
+                chat[i].body = .proposal(f, .offline); say(t.pending)
+            case .failed(let m):
+                chat[i].body = .proposal(f, .ready)
+                if !m.isEmpty { post(.text(m, warn: true)) }
+            }
+        }
+    }
+    func cancelChat(_ id: UUID) {
+        guard let i = index(id), case .proposal(let f, .ready) = chat[i].body else { return }
+        chat[i].body = .proposal(f, .cancelled)
+    }
+    /// Opens the full check screen for a card in the conversation.
+    func editChat(_ id: UUID) {
+        guard let i = index(id), case .proposal(var f, .ready) = chat[i].body else { return }
+        f.step = .check; editingChatId = id; flow = f
     }
 
     // ---------- check + save ----------
@@ -260,10 +324,11 @@ final class AppState: ObservableObject {
     func yesNoSend() { if hearingYesNo { mic.stopTalking() } }
     func yesNoCancel() { if hearingYesNo { mic.cancel() } }
 
-    /// Save the job. Without signal it is kept on the phone and sent later, never twice.
-    func confirm() {
-        guard let f = flow, let h = hotelId, !blocked(f), !busy else { return }
-        busy = true; notice = nil
+    enum SaveOutcome { case saved(String), offline, failed(String) }
+
+    /// Save a job. Without signal it is kept on the phone and sent later, never twice.
+    private func save(_ f: Flow) async -> SaveOutcome {
+        guard let h = hotelId else { return .failed("") }
         let key = UUID().uuidString.lowercased()
         let place = f.kind == .placeInRoom
         let lines: [[String: Any]] = f.lines.map { l in
@@ -277,20 +342,39 @@ final class AppState: ObservableObject {
         let data = (try? JSONSerialization.data(withJSONObject: body)) ?? Data()
         let label = summary(f)
         let roomNumbers = Array(Set(f.lines.compactMap { $0.roomNumber }))
+        do {
+            let r = try await api.postTransaction(data, key: key)
+            if let u = me { store.addRecentRooms(u.id, roomNumbers) }
+            await loadData()
+            return .saved(String(r.eventId.prefix(6)).uppercased())
+        } catch let e as ApiError {
+            if e.status == 401 { api.clearSession(); me = nil; return .failed("") }
+            return .failed(e.message)
+        } catch {
+            store.enqueue(Pending(key: key, body: String(data: data, encoding: .utf8) ?? "{}", label: label, createdAt: Date().timeIntervalSince1970, error: nil))
+            outbox = store.outbox
+            return .offline
+        }
+    }
+
+    /// Confirm on the full check screen.
+    func confirm() {
+        guard let f = flow, !blocked(f), !busy else { return }
+        busy = true; notice = nil
+        let chatId = editingChatId
         Task {
-            do {
-                let r = try await api.postTransaction(data, key: key)
-                if let u = me { store.addRecentRooms(u.id, roomNumbers) }
-                var done = f; done.step = .done; done.ref = String(r.eventId.prefix(6)).uppercased()
-                flow = done
-                await loadData()
-            } catch let e as ApiError {
-                if e.status == 401 { api.clearSession(); me = nil } else { notice = Notice(text: e.message) }
-            } catch {
-                store.enqueue(Pending(key: key, body: String(data: data, encoding: .utf8) ?? "{}", label: label, createdAt: Date().timeIntervalSince1970, error: nil))
-                outbox = store.outbox
-                var done = f; done.step = .done; done.offline = true
-                flow = done
+            let r = await save(f)
+            switch r {
+            case .saved(let ref): var d = f; d.step = .done; d.ref = ref; flow = d
+            case .offline: var d = f; d.step = .done; d.offline = true; flow = d
+            case .failed(let m): if !m.isEmpty { notice = Notice(text: m) }
+            }
+            if let id = chatId, let i = index(id) {
+                switch r {
+                case .saved(let ref): chat[i].body = .proposal(f, .saved(ref)); editingChatId = nil
+                case .offline: chat[i].body = .proposal(f, .offline); editingChatId = nil
+                case .failed: break
+                }
             }
             busy = false
         }

@@ -76,3 +76,20 @@ extension Product {
         return (aliases ?? []).first { a in a.alias.unicodeScalars.contains { range.contains($0.value) } }?.alias
     }
 }
+
+// ---------- conversation ----------
+enum ChatRole { case me, app }
+enum ChatState { case ready, saving, saved(String), offline, cancelled }
+struct BagLine: Hashable { let name: String; let native: String?; let emoji: String; let qty: Int }
+enum ChatBody {
+    case said(String, spoken: Bool)
+    case text(String, warn: Bool)
+    case proposal(Flow, ChatState)
+    case stock([QueryRow])
+    case bag([BagLine])
+}
+struct ChatMessage: Identifiable {
+    let id = UUID()
+    let role: ChatRole
+    var body: ChatBody
+}
