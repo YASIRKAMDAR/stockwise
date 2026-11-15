@@ -26,7 +26,9 @@ class ScreensTest {
         override val available = true
         override fun hasPermission() = true
         override fun requestPermission() {}
-        override fun start(lang: String, record: Boolean, onInterim: (String) -> Unit, onDone: (String?, Int?) -> Unit) { onInterim("Room 203, two soap and one shampoo") }
+        override fun start(lang: String, record: Boolean, onInterim: (String) -> Unit, onLevel: (Float) -> Unit, onDone: (String?, Int?) -> Unit) { onInterim("Room 203, two soap and one shampoo"); onLevel(0.7f) }
+        override fun hasVoice(lang: String) = true
+        override val online = true
         override fun takeRecording(): ByteArray? = null
         override fun release() {}
         override fun cancel() {}
@@ -86,4 +88,12 @@ class ScreensTest {
     @Test fun s10_bag() { val s = state(); s.tab = Tab.BAG; shot("10-my-bag", s) }
     @Test fun s11_history() { val s = state(); s.tab = Tab.HISTORY; shot("11-history", s) }
     @Test fun s12_gujarati() { val s = state(); s.lang = "gu"; shot("12-home-gujarati", s) }
+    @Test fun s13_check_language_tag() {
+        val s = state(); s.heardLang = "mixed"
+        s.flow = Flow(Kind.PLACE_IN_ROOM, Step.CHECK, "r203", "203", proposalId = "x", transcript = "Room 203 ma do soap aur ek shampoo mukyu",
+            lines = listOf(Line("p1", 2, "r203", "203", "MY_STOCK"), Line("p2", 1, "r203", "203", "MY_STOCK")))
+        shot("13-check-language-tag", s)
+    }
+    @Test fun s14_google_slow() { val s = state(); s.retryHeard = ""; shot("14-google-slow", s) }
+    @Test fun s15_still_asking() { val s = state(); s.busy = true; s.waitingLong = true; shot("15-still-asking", s) }
 }

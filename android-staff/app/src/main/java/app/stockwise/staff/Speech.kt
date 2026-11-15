@@ -26,6 +26,7 @@ class HoldListener(private val ctx: Context) {
     private val parts = mutableListOf<String>()
     private var partial = ""
     private var onText: (String) -> Unit = {}
+    var onLevel: (Float) -> Unit = {}
     private var onDone: (String?, Int?) -> Unit = { _, _ -> }
     private var lang = "en"
 
@@ -54,7 +55,7 @@ class HoldListener(private val ctx: Context) {
         r.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {}
             override fun onBeginningOfSpeech() {}
-            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onRmsChanged(rmsdB: Float) { onLevel(((rmsdB + 2f) / 12f).coerceIn(0f, 1f)) }
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() {}
             override fun onEvent(eventType: Int, params: Bundle?) {}
@@ -105,9 +106,13 @@ class HoldListener(private val ctx: Context) {
 class Speaker(ctx: Context) {
     private var ready = false
     private val tts: TextToSpeech = TextToSpeech(ctx.applicationContext) { ready = it == TextToSpeech.SUCCESS }
+    /** Whether this phone can read aloud in the language. */
+    fun hasVoice(lang: String): Boolean = ready && tts.isLanguageAvailable(Locale.forLanguageTag(localeTag(lang))) >= TextToSpeech.LANG_AVAILABLE
+    /** Reads aloud in the language asked for; without a voice for it (common for Gujarati), Hindi, then English. */
     fun say(text: String, lang: String) {
         if (!ready) return
-        tts.language = Locale.forLanguageTag(localeTag(lang))
+        val pick = listOf(lang, "hi", "en").firstOrNull { hasVoice(it) } ?: lang
+        tts.language = Locale.forLanguageTag(localeTag(pick))
         tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "sw")
     }
     fun stop() { if (ready) tts.stop() }

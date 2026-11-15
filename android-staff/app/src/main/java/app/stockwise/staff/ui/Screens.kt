@@ -26,6 +26,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.stockwise.staff.*
@@ -40,12 +41,15 @@ interface Mic {
     fun hasPermission(): Boolean
     fun requestPermission()
     /** record = keep the recording for Google's model instead of the phone's own recognizer. */
-    fun start(lang: String, record: Boolean, onInterim: (String) -> Unit, onDone: (String?, Int?) -> Unit)
+    fun start(lang: String, record: Boolean, onInterim: (String) -> Unit, onLevel: (Float) -> Unit, onDone: (String?, Int?) -> Unit)
     /** The last recording (m4a), once; null when cancelled or not recording. */
     fun takeRecording(): ByteArray?
     fun release()
     fun cancel()
     fun say(text: String, lang: String)
+    fun hasVoice(lang: String): Boolean
+    /** Whether the phone has a network right now. */
+    val online: Boolean
 }
 
 @Composable
@@ -155,20 +159,26 @@ fun VoiceBar(s: AppState, mic: Mic) {
     var live by remember { mutableStateOf(false) }
     var startedAt by remember { mutableLongStateOf(0L) }
     var interim by remember { mutableStateOf("") }
+    var level by remember { mutableFloatStateOf(0f) }
     Composer(
         placeholder = t.typeHere, slideText = t.slideToCancel, releaseCancelText = t.releaseToCancel,
-        live = live, startedAt = startedAt, interim = interim, busy = s.busy, micAvailable = s.cloudVoice || mic.available,
+        live = live, startedAt = startedAt, interim = interim, level = level, busy = s.busy, waitingLong = s.waitingLong,
+        stillAsking = t.stillAsking, micAvailable = s.cloudVoice || mic.available,
+        draft = s.draft, onDraft = { s.draft = it },
         onText = { s.interpret(it, 0) },
         onStart = {
             if (!mic.hasPermission()) { mic.requestPermission(); return@Composer }
-            s.notice = null; s.answer = null; interim = ""; startedAt = System.currentTimeMillis(); live = true
-            val cloud = s.cloudVoice
-            mic.start(s.lang, cloud, { interim = it }) { text, err ->
-                live = false
+            // No signal: the phone listens by itself (Hindi/English); Google is used only when online.
+            val cloud = s.cloudVoice && mic.online
+            if (!cloud && !mic.available) { s.notice = Notice(t.noVoice); s.nudgeTap = true; return@Composer }
+            s.notice = if (s.cloudVoice && !mic.online) Notice(t.offlineVoice, warn = false) else null
+            s.answer = null; s.retryHeard = null; interim = ""; level = 0f; startedAt = System.currentTimeMillis(); live = true
+            mic.start(s.lang, cloud, { interim = it }, { level = it }) { text, err ->
+                live = false; level = 0f
                 val ms = System.currentTimeMillis() - startedAt
                 val audio = if (cloud) mic.takeRecording() else null
                 when {
-                    audio != null && audio.size > 2000 && ms >= 600 -> s.interpretAudio(audio, ms)
+                    audio != null && audio.size > 2000 && ms >= 600 -> s.interpretAudio(audio, ms, text ?: "")
                     text == null && err == null -> {}                                   // cancelled
                     !text.isNullOrBlank() -> s.interpret(text, ms)
                     else -> s.missed()
@@ -209,6 +219,19 @@ fun HomeScreen(s: AppState) {
             }
         }
         s.notice?.let { Banner(it.text, it.warn) }
+        s.retryHeard?.let { heard ->
+            // Google didn't answer: two ways forward instead of a dead end.
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(C.MarigoldWash).padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(t.googleSlow, color = C.Amber, fontWeight = FontWeight.SemiBold)
+                if (heard.isNotBlank()) Text(heard, color = C.Ink2, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button({ s.retryHeard = null; s.notice = Notice(t.holdHint, warn = false) }, Modifier.weight(1f).height(44.dp), shape = RoundedCornerShape(22.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = C.Brick, contentColor = Color.White)) { Text(t.sayAgain) }
+                    OutlinedButton({ s.retryHeard = null; s.draft = heard }, Modifier.weight(1f).height(44.dp), shape = RoundedCornerShape(22.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = C.Ink)) { Text(t.typeIt) }
+                }
+            }
+        }
         s.answer?.let { rows ->
             Panel {
                 rows.forEach { r -> Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {

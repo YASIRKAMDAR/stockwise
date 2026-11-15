@@ -27,6 +27,7 @@ import kotlinx.serialization.json.JsonElement
     val proposalId: String, val status: String, val transcript: String = "", val action: String,
     val lines: List<ProposalLine> = emptyList(), val queryResult: List<QueryRow>? = null, val clarificationQuestion: String? = null,
     val detectedLanguage: String? = null,
+    val warnings: List<String> = emptyList(),
 )
 @Serializable data class EventLine(val productId: String? = null, val name: String = "", val quantity: Int = 0, val roomNumber: String? = null)
 @Serializable data class Event(val eventId: String, val action: String, val createdAt: String, val viaVoice: Boolean = false, val reversedBy: String? = null, val lines: List<EventLine>? = null)

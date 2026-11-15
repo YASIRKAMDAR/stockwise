@@ -74,19 +74,25 @@ fun Composer(
     live: Boolean, startedAt: Long, interim: String, busy: Boolean, micAvailable: Boolean,
     onText: (String) -> Unit, onStart: () -> Unit, onSend: () -> Unit, onCancel: () -> Unit, onTap: () -> Unit,
     modifier: Modifier = Modifier,
+    level: Float = 0f, waitingLong: Boolean = false, stillAsking: String = "",
+    draft: String? = null, onDraft: (String) -> Unit = {},
 ) {
-    var text by remember { mutableStateOf("") }
+    var local by remember { mutableStateOf("") }
+    val text = draft ?: local
+    val setText: (String) -> Unit = { if (draft != null) onDraft(it) else local = it }
     var armed by remember { mutableStateOf(false) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(live) { while (live) { now = System.currentTimeMillis(); delay(250) } }
-    val submit = { val v = text.trim(); if (v.isNotEmpty() && !busy) { text = ""; onText(v) } }
+    val submit = { val v = text.trim(); if (v.isNotEmpty() && !busy) { setText(""); onText(v) } }
     Row(modifier.fillMaxWidth().background(C.Linen).padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.weight(1f).height(56.dp).clip(RoundedCornerShape(28.dp)).background(C.Paper)
             .border(1.5.dp, if (live) (if (armed) C.Ink3 else C.Brick) else C.Line, RoundedCornerShape(28.dp)).padding(horizontal = 20.dp),
             contentAlignment = Alignment.CenterStart) {
-            if (live) {
+            if (busy && waitingLong) {
+                Text(stillAsking, color = C.Ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            } else if (live) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(10.dp).clip(CircleShape).background(C.Brick))
+                    LevelMeter(level)
                     Spacer(Modifier.width(8.dp))
                     Text(fmtSecs(now - startedAt), fontWeight = FontWeight.Bold, color = C.Ink)
                     Spacer(Modifier.width(10.dp))
@@ -94,7 +100,7 @@ fun Composer(
                         color = if (armed) C.Brick else C.Ink2, fontWeight = if (armed) FontWeight.Bold else FontWeight.Normal)
                 }
             } else {
-                BasicTextField(value = text, onValueChange = { text = it }, singleLine = true, enabled = !busy,
+                BasicTextField(value = text, onValueChange = setText, singleLine = true, enabled = !busy,
                     textStyle = TextStyle(fontSize = 17.sp, color = C.Ink), cursorBrush = SolidColor(C.Indigo),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send), keyboardActions = KeyboardActions(onSend = { submit() }),
                     modifier = Modifier.fillMaxWidth().semantics { contentDescription = placeholder },
@@ -136,4 +142,16 @@ fun BigButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, 
 @Composable
 fun Panel(modifier: Modifier = Modifier, border: Color = C.Line, bg: Color = C.Paper, content: @Composable ColumnScope.() -> Unit) {
     Column(modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(bg).border(1.dp, border, RoundedCornerShape(16.dp)).padding(14.dp), content = content)
+}
+
+
+/** Five bars that rise with the staff member's voice, so they can see they're being heard. */
+@Composable
+fun LevelMeter(level: Float, modifier: Modifier = Modifier) {
+    Row(modifier.height(22.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+        for (i in 0 until 5) {
+            val on = level > i / 5f
+            Box(Modifier.width(4.dp).height((8 + i * 3).dp).clip(RoundedCornerShape(2.dp)).background(if (on) C.Brick else C.Brick.copy(alpha = 0.25f)))
+        }
+    }
 }

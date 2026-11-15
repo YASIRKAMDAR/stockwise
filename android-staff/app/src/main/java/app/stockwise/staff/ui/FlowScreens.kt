@@ -136,7 +136,7 @@ private fun CheckStep(s: AppState, f: Flow, mic: Mic) {
         // Read aloud in the language the staff member spoke, when Google's model detected one.
         val rl = s.replyLang ?: s.lang
         val said = T(rl).summary(f.kind, f.lines.sumOf { it.quantity }, f.lines.firstOrNull { it.roomNumber != null }?.roomNumber)
-        if (fromVoice && !blocked) mic.say(said + ". " + f.lines.joinToString(", ") { l -> "${l.quantity} ${s.product(l.productId)?.let { it.native(rl) ?: it.name } ?: ""}" }, rl)
+        if (fromVoice && !blocked) s.speak(mic, said + ". " + f.lines.joinToString(", ") { l -> "${l.quantity} ${s.product(l.productId)?.let { it.native(rl) ?: it.name } ?: ""}" }, rl)
     }
     val room = f.lines.firstOrNull { it.roomNumber != null }?.roomNumber
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -148,9 +148,19 @@ private fun CheckStep(s: AppState, f: Flow, mic: Mic) {
             Panel {
                 Row(verticalAlignment = Alignment.Top) {
                     Text(sentence, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
-                    IconButton({ mic.say(sentence, s.lang) }) { Icon(Icons.AutoMirrored.Filled.VolumeUp, "Read aloud", tint = C.Indigo) }
+                    IconButton({ s.speak(mic, sentence, s.lang) }) { Icon(Icons.AutoMirrored.Filled.VolumeUp, "Read aloud", tint = C.Indigo) }
                 }
-                f.transcript?.let { Text("${t.heard}: “$it”", style = MaterialTheme.typography.bodyMedium, fontSize = 13.sp) }
+                f.transcript?.let { tr ->
+                    // What was heard, tagged with the language; tap it to correct the words and send again.
+                    Row(Modifier.fillMaxWidth().clickable { s.flow = null; s.draft = tr }, verticalAlignment = Alignment.CenterVertically) {
+                        Text("${t.heard}: “$tr”", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, fontSize = 13.sp)
+                        t.langTag(s.heardLang)?.let { tag ->
+                            Text(tag, Modifier.clip(RoundedCornerShape(10.dp)).background(C.IndigoWash).padding(horizontal = 7.dp, vertical = 2.dp), color = C.Indigo, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                        Spacer(Modifier.width(6.dp))
+                        Text("✎ ${t.tapToFix}", color = C.Ink3, fontSize = 11.sp)
+                    }
+                }
             }
             f.lines.forEachIndexed { i, l -> LineCard(s, f, i, l) }
             s.notice?.let { Banner(it.text) }

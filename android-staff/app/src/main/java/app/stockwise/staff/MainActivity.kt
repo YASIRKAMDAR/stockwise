@@ -3,6 +3,10 @@ package app.stockwise.staff
 import android.Manifest
 import android.content.pm.PackageManager
 import android.media.MediaRecorder
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.os.Handler
+import android.os.Looper
 import android.os.Build
 import android.os.Bundle
 import java.io.File
@@ -27,9 +31,16 @@ class MainActivity : ComponentActivity() {
         override val available get() = listener.available
         override fun hasPermission() = ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
         override fun requestPermission() = askMic.launch(Manifest.permission.RECORD_AUDIO)
-        override fun start(lang: String, record: Boolean, onInterim: (String) -> Unit, onDone: (String?, Int?) -> Unit) {
+        override fun start(lang: String, record: Boolean, onInterim: (String) -> Unit, onLevel: (Float) -> Unit, onDone: (String?, Int?) -> Unit) {
             speaker.stop()
-            if (record) startRecording(onDone) else listener.start(lang, onInterim, onDone)
+            listener.onLevel = onLevel
+            if (record) startRecording(onLevel, onDone) else listener.start(lang, onInterim, onDone)
+        }
+        override fun hasVoice(lang: String) = speaker.hasVoice(lang)
+        override val online: Boolean get() {
+            val cm = getSystemService(ConnectivityManager::class.java) ?: return true
+            val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
+            return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
         }
         override fun release() { if (recorder != null) stopRecording(keep = true) else listener.release() }
         override fun cancel() { if (recorder != null) stopRecording(keep = false) else listener.cancel() }
@@ -43,7 +54,8 @@ class MainActivity : ComponentActivity() {
     private var recDone: ((String?, Int?) -> Unit)? = null
     private var recorded: ByteArray? = null
 
-    private fun startRecording(onDone: (String?, Int?) -> Unit) {
+    private val levelTicker = Handler(Looper.getMainLooper())
+    private fun startRecording(onLevel: (Float) -> Unit, onDone: (String?, Int?) -> Unit) {
         recorded = null
         val f = File(cacheDir, "stockwise-voice.m4a").also { it.delete() }
         @Suppress("DEPRECATION")
@@ -64,11 +76,22 @@ class MainActivity : ComponentActivity() {
             return
         }
         recorder = r; recFile = f; recDone = onDone
+        // Loudness ~12 times a second while recording, so the bar moves as the staff member speaks.
+        levelTicker.post(object : Runnable {
+            override fun run() {
+                val rec = recorder ?: return
+                val amp = runCatching { rec.maxAmplitude }.getOrDefault(0)
+                val db = 20 * kotlin.math.log10(amp.coerceAtLeast(1).toDouble() / 32767.0)   // -90 … 0 dB
+                onLevel(((db + 45) / 40).toFloat().coerceIn(0f, 1f))
+                levelTicker.postDelayed(this, 80)
+            }
+        })
     }
 
     private fun stopRecording(keep: Boolean) {
         val r = recorder ?: return
         recorder = null
+        levelTicker.removeCallbacksAndMessages(null)
         val ok = runCatching { r.stop() }.isSuccess   // stop() fails when nothing was recorded
         runCatching { r.release() }
         recorded = if (keep && ok) recFile?.takeIf { it.exists() }?.readBytes() else null

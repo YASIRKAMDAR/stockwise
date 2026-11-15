@@ -69,14 +69,16 @@ class Api(private val store: Store, private val base: String = BuildConfig.API_B
         upload(hotelId, lang, durationMs, "speech.txt", text.toRequestBody("text/plain".toMediaType()))
 
     /** The recording itself, so Google's model can hear Gujarati, Hindi and English mixed in one sentence. */
-    suspend fun interpretAudio(hotelId: String, audio: ByteArray, lang: String, durationMs: Long): Proposal =
-        upload(hotelId, lang, durationMs, "speech.m4a", audio.toRequestBody("audio/mp4".toMediaType()))
+    suspend fun interpretAudio(hotelId: String, audio: ByteArray, lang: String, durationMs: Long, heard: String = ""): Proposal =
+        upload(hotelId, lang, durationMs, "speech.m4a", audio.toRequestBody("audio/mp4".toMediaType()), heard)
 
-    private suspend fun upload(hotelId: String, lang: String, durationMs: Long, name: String, file: RequestBody): Proposal {
+    private suspend fun upload(hotelId: String, lang: String, durationMs: Long, name: String, file: RequestBody, heard: String = ""): Proposal {
         val body = MultipartBody.Builder().setType(MultipartBody.FORM)
             .addFormDataPart("hotelId", hotelId)
             .addFormDataPart("preferredLanguage", when (lang) { "hi" -> "hi-IN"; "gu" -> "gu-IN"; else -> "en-IN" })
             .addFormDataPart("durationMs", durationMs.coerceAtLeast(0).toString())
+            .addFormDataPart("client", "android")
+            .apply { if (heard.isNotBlank()) addFormDataPart("heard", heard) }   // so the server can still answer if Google is slow
             .addFormDataPart("audio", name, file)
             .build()
         return json.decodeFromString(Proposal.serializer(), raw("POST", "/voice/interpret", body))

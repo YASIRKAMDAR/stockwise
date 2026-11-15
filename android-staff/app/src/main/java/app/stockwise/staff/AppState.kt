@@ -7,6 +7,7 @@ import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.UUID
 
@@ -113,6 +114,20 @@ class AppState(ctx: Context) {
     val cloudVoice get() = me?.config?.voiceProvider == "gemini"
     /** The language the staff member actually spoke (when it was one language): replies are read aloud in it. */
     var replyLang by mutableStateOf<String?>(null)
+    /** Short code for the language tag shown with what was heard: gu / hi / en / mixed. */
+    var heardLang by mutableStateOf<String?>(null)
+    /** True once a voice request has waited 3 s, so the screen can say it's still asking Google. */
+    var waitingLong by mutableStateOf(false)
+    /** Text put into the box by "Type it" or by tapping what was heard, to correct before sending. */
+    var draft by mutableStateOf("")
+    /** Google didn't answer and the server had nothing to fall back on: what the phone heard, for the retry card. */
+    var retryHeard by mutableStateOf<String?>(null)
+    private var toldNoGuVoice = false
+    /** Read aloud in the language spoken; if this phone has no voice for it, the Mic falls back and we say so once. */
+    fun speak(mic: app.stockwise.staff.ui.Mic, text: String, lang: String) {
+        if (lang == "gu" && !mic.hasVoice("gu") && !toldNoGuVoice) { toldNoGuVoice = true; notice = Notice(t.noGuVoice, warn = false) }
+        mic.say(text, lang)
+    }
 
     private fun applyCommand(c: LocalCommand) {
         misses = 0
@@ -131,18 +146,22 @@ class AppState(ctx: Context) {
     }
 
     /** A recording: Google's model hears it, whatever mix of languages was spoken. */
-    fun interpretAudio(audio: ByteArray, durationMs: Long) = scope.launch {
+    fun interpretAudio(audio: ByteArray, durationMs: Long, heard: String = "") = scope.launch {
         val h = hotelId ?: return@launch
         notice = null; answer = null
-        run(fromRecording = true) { api.interpretAudio(h, audio, lang, durationMs) }
+        run(fromRecording = true, heard = heard) { api.interpretAudio(h, audio, lang, durationMs, heard) }
     }
 
-    private suspend fun run(fromRecording: Boolean = false, call: suspend () -> Proposal) {
-        busy = true
+    private suspend fun run(fromRecording: Boolean = false, heard: String = "", call: suspend () -> Proposal) {
+        busy = true; waitingLong = false; retryHeard = null
+        // After 3 s the spinner says the app is still waiting for Google, so the screen never looks frozen.
+        val waiter = scope.launch { delay(3000); waitingLong = true }
         try {
             val p = call()
             if (fromRecording) localCommand(p.transcript)?.let { applyCommand(it); busy = false; return }
             replyLang = when (p.detectedLanguage) { "gu-IN" -> "gu"; "hi-IN" -> "hi"; "en-IN" -> "en"; else -> null }
+            heardLang = replyLang ?: if (p.detectedLanguage == "mixed") "mixed" else null
+            if ("FALLBACK_RULES" in p.warnings) notice = Notice(t.fromPhoneWords)
             val kind = Kind.of(p.action)
             when {
                 p.status == "QUERY_RESULT" -> { answer = p.queryResult ?: emptyList(); misses = 0 }
@@ -161,8 +180,15 @@ class AppState(ctx: Context) {
                 kind != null -> { misses = 0; start(kind) }
                 else -> missed()
             }
-        } catch (e: ApiException) { if (e.status == 401) { store.session = null; me = null } else notice = Notice(e.message) }
-        catch (e: OfflineException) { notice = Notice(t.noVoice) }
+        } catch (e: ApiException) {
+            when {
+                e.status == 401 -> { store.session = null; me = null }
+                e.status >= 500 && fromRecording -> retryHeard = heard      // Google slow and nothing to fall back on
+                else -> notice = Notice(e.message)
+            }
+        }
+        catch (e: OfflineException) { if (fromRecording) retryHeard = heard else notice = Notice(t.noVoice) }
+        waiter.cancel(); waitingLong = false
         busy = false
     }
     fun missed() {
