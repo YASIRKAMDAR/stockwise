@@ -126,3 +126,19 @@ export function parseCountSpeech(text: string, products: CountProduct[]) {
   const understood = out.length > 0;
   return { items: out, missed: !understood && text.trim() ? text.trim() : null, productsWithoutNumber: taken.filter(([, , p]) => !out.some((o) => o.productId === p.productId)).map(([, , p]) => p.name) };
 }
+
+/** Short spoken or typed commands the app handles itself, without asking the server:
+ * "my bag", "history", "home", "sign out", "Hindi" / "Gujarati" / "English". */
+export type LocalCommand = { go: 'home' | 'bag' | 'history' } | { lang: Lang } | { signOut: true };
+export function localCommand(text: string): LocalCommand | null {
+  const s = text.toLowerCase().replace(/[.,!?।]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!s || /[0-9०-९૦-૯]/.test(s) || s.split(' ').length > 5) return null;
+  if (/sign ?out|log ?out|साइन आउट|लॉग ?आउट|સાઇન આઉટ|લૉગ ?આઉટ/.test(s)) return { signOut: true };
+  if (/\benglish\b|अंग्रेज़ी|अंग्रेजी|અંગ્રેજી/.test(s)) return { lang: 'en' };
+  if (/\bhindi\b|हिंदी|हिन्दी|હિન્દી|હિંદી/.test(s)) return { lang: 'hi' };
+  if (/\bgujarati\b|गुजराती|ગુજરાતી/.test(s)) return { lang: 'gu' };
+  if (/\bhistory\b|what did i do|इतिहास|हिस्ट्री|ઇતિહાસ|હિસ્ટ્રી/.test(s)) return { go: 'history' };
+  if (/\bbag\b|बैग|બેગ/.test(s)) return { go: 'bag' };
+  if (/^(go )?(to )?(the )?home( screen)?$|होम|હોમ/.test(s)) return { go: 'home' };
+  return null;
+}

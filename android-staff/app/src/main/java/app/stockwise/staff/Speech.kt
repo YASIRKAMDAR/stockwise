@@ -120,3 +120,25 @@ fun yesNo(text: String): Boolean? {
     val w = text.lowercase().split(Regex("[\\s,.!?।]+"))
     return when { w.any { it in NO } -> false; w.any { it in YES } -> true; else -> null }
 }
+
+/** Short spoken or typed commands the app handles itself: "my bag", "history", "home", "sign out", a language name. */
+sealed class LocalCommand {
+    data class Go(val tab: Tab) : LocalCommand()
+    data class Language(val lang: String) : LocalCommand()
+    object SignOut : LocalCommand()
+}
+fun localCommand(text: String): LocalCommand? {
+    val s = text.lowercase().replace(Regex("[.,!?।]"), " ").replace(Regex("\\s+"), " ").trim()
+    if (s.isEmpty() || s.any { it.isDigit() } || s.split(" ").size > 5) return null
+    fun has(p: String) = Regex(p).containsMatchIn(s)
+    return when {
+        has("sign ?out|log ?out|साइन आउट|लॉग ?आउट|સાઇન આઉટ|લૉગ ?આઉટ") -> LocalCommand.SignOut
+        has("\\benglish\\b|अंग्रेज़ी|अंग्रेजी|અંગ્રેજી") -> LocalCommand.Language("en")
+        has("\\bhindi\\b|हिंदी|हिन्दी|હિન્દી|હિંદી") -> LocalCommand.Language("hi")
+        has("\\bgujarati\\b|गुजराती|ગુજરાતી") -> LocalCommand.Language("gu")
+        has("\\bhistory\\b|what did i do|इतिहास|हिस्ट्री|ઇતિહાસ|હિસ્ટ્રી") -> LocalCommand.Go(Tab.HISTORY)
+        has("\\bbag\\b|बैग|બેગ") -> LocalCommand.Go(Tab.BAG)
+        has("^(go )?(to )?(the )?home( screen)?$|होम|હોમ") -> LocalCommand.Go(Tab.HOME)
+        else -> null
+    }
+}

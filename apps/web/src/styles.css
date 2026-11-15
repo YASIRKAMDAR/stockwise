@@ -363,3 +363,6 @@ tr.justheard td { background: #E3F5EC; transition: background .6s; }
 .voice-intro .dot svg { width: 26px; height: 26px; }
 .holdmic { width: 64px; height: 56px; flex: 0 0 auto; border-radius: 16px; border: 0; background: var(--marigold); color: var(--ink); display: grid; place-items: center; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .holdmic svg { width: 26px; height: 26px; } .holdmic.rec { background: var(--brick); color: #fff; }
+
+.cansay { margin-top: -6px; color: var(--ink-2); } .cansay summary { cursor: pointer; font-weight: 600; padding: 4px 2px; }
+.cansay ul { margin: 6px 0 0; padding-left: 20px; } .cansay li { margin: 4px 0; font-size: .98rem; }

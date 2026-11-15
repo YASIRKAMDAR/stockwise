@@ -52,6 +52,8 @@ struct T {
     var retry: String { s("Try again", "फिर कोशिश करें", "ફરી પ્રયાસ કરો") }
     var store: String { s("Store", "स्टोर", "સ્ટોર") }
     var inBag: String { s("in your bag", "आपके बैग में", "તમારી બેગમાં") }
+    var youCanSay: String { s("You can say", "आप बोल सकते हैं", "તમે બોલી શકો") }
+    var examples: [String] { lang == "hi" ? ["“रूम 203 में दो साबुन रखे”", "“स्टोर से दस साबुन लिए”", "“तीन शैम्पू वापस”", "“बीस साबुन आए”", "“कितने साबुन बचे?”", "“मेरा बैग” · “इतिहास” · “साइन आउट”"] : lang == "gu" ? ["“રૂમ 203 માં બે સાબુ મૂક્યા”", "“સ્ટોરમાંથી દસ સાબુ લીધા”", "“ત્રણ શેમ્પૂ પરત”", "“વીસ સાબુ આવ્યા”", "“કેટલા સાબુ બચ્યા?”", "“મારી બેગ” · “ઇતિહાસ” · “સાઇન આઉટ”"] : ["“Put two soaps in room 203”", "“Take ten soap from the store”", "“Return three shampoo”", "“Twenty soap arrived”", "“How many soap are left?”", "“My bag” · “History” · “Sign out”"] }
     func act(_ k: Kind) -> (String, String) {
         switch k {
         case .placeInRoom: return (s("Put in room", "कमरे में रखा", "રૂમમાં મૂક્યું"), s("From your bag or the store", "बैग या स्टोर से", "બેગ કે સ્ટોરમાંથી"))

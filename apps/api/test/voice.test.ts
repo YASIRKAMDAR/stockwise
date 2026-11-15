@@ -198,6 +198,29 @@ describe('Test-mode parser: voice-first phrasing', async () => {
     expect(r.action).toBe('PLACE_IN_ROOM');
     expect(r.items.map((i) => [i.quantity, i.roomNumber])).toEqual([[2, '203'], [1, '203']]);
   });
+  it.each([
+    ['take ten soap from the store', 'CHECKOUT_TO_STAFF', 10],
+    ['from the store, ten soap', 'CHECKOUT_TO_STAFF', 10],
+    ['store se das sabun le liya', 'CHECKOUT_TO_STAFF', 10],
+    ['સ્ટોરમાંથી પાંચ સાબુ લીધા', 'CHECKOUT_TO_STAFF', 5],
+    ['return three soap to the store', 'RETURN_TO_STORE', 3],
+    ['put back two shampoo', 'RETURN_TO_STORE', 2],
+    ['तीन साबुन वापस', 'RETURN_TO_STORE', 3],
+    ['ત્રણ સાબુ પરત', 'RETURN_TO_STORE', 3],
+    ['fifty soap arrived from the supplier', 'SUPPLIER_RECEIPT', 50],
+    ['delivery of twenty shampoo', 'SUPPLIER_RECEIPT', 20],
+    ['took two soap from the store and put in room 203', 'PLACE_IN_ROOM', 2],
+  ])('"%s" is understood as %s', (text, action, qty) => {
+    const r = fakeParse(text as string, ctx);
+    expect(r.action).toBe(action);
+    expect(r.items[0].quantity).toBe(qty);
+  });
+  it.each([['take from store', 'CHECKOUT_TO_STAFF'], ['return to store', 'RETURN_TO_STORE'], ['stock arrived', 'SUPPLIER_RECEIPT']])(
+    '"%s" with no items still names the job', (text, action) => {
+      const r = fakeParse(text, ctx);
+      expect(r.action).toBe(action);
+      expect(r.items).toHaveLength(0);
+    });
   it('understands रूम and Hindi number words', () => {
     const r = fakeParse('रूम 115 में छह साबुन', ctx);
     expect(r.action).toBe('PLACE_IN_ROOM');

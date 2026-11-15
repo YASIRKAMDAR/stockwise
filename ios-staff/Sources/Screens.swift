@@ -173,6 +173,8 @@ struct HomeScreen: View {
                             Text(t.example).font(.system(size: 15)).foregroundColor(C.ink2)
                         }
                     }
+                    Text(t.youCanSay).font(.system(size: 13, weight: .bold)).foregroundColor(C.ink2).padding(.top, 4)
+                    ForEach(Array(t.examples.dropFirst()), id: \.self) { e in Text(e).font(.system(size: 14)).foregroundColor(C.ink2) }
                 }
                 if !waiting.isEmpty {
                     Panel(border: C.marigold, bg: C.marigoldWash) {

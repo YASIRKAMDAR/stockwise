@@ -31,6 +31,8 @@ class T(val lang: String) {
         Kind.RETURN_TO_STORE -> s("Return to store", "स्टोर में वापस", "સ્ટોરમાં પાછું") to s("From your bag", "अपने बैग से", "તમારી બેગમાંથી")
         Kind.SUPPLIER_RECEIPT -> s("Stock arrived", "सामान आया", "સામાન આવ્યો") to s("From the supplier", "सप्लायर से", "સપ્લાયર પાસેથી")
     }
+    val youCanSay get() = s("You can say", "आप बोल सकते हैं", "તમે બોલી શકો")
+    val examples: List<String> get() = when (lang) { "hi" -> listOf("“रूम 203 में दो साबुन रखे”", "“स्टोर से दस साबुन लिए”", "“तीन शैम्पू वापस”", "“बीस साबुन आए”", "“कितने साबुन बचे?”", "“मेरा बैग” · “इतिहास” · “साइन आउट”"); "gu" -> listOf("“રૂમ 203 માં બે સાબુ મૂક્યા”", "“સ્ટોરમાંથી દસ સાબુ લીધા”", "“ત્રણ શેમ્પૂ પરત”", "“વીસ સાબુ આવ્યા”", "“કેટલા સાબુ બચ્યા?”", "“મારી બેગ” · “ઇતિહાસ” · “સાઇન આઉટ”"); else -> listOf("“Put two soaps in room 203”", "“Take ten soap from the store”", "“Return three shampoo”", "“Twenty soap arrived”", "“How many soap are left?”", "“My bag” · “History” · “Sign out”") }
     val whichRoom get() = s("Which room?", "कौन सा कमरा?", "કયો રૂમ?")
     val room get() = s("Room", "कमरा", "રૂમ")
     val recent get() = s("Recent", "हाल के", "તાજેતરના")

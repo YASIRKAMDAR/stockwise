@@ -175,7 +175,25 @@ final class AppState: ObservableObject {
     /// Text from the mic or the text box → the server works out the job → check screen.
     func interpret(_ text: String, durationMs: Int) {
         guard let h = hotelId else { return }
-        notice = nil; answer = nil; busy = true
+        notice = nil; answer = nil
+        if let c = localCommand(text) {
+            misses = 0
+            switch c {
+            case .go(let to):
+                go(to)
+                if to == .bag {
+                    let items = activeProducts.compactMap { p -> String? in
+                        guard let q = bag[p.id], q > 0 else { return nil }
+                        return "\(p.native(lang) ?? p.name) \(q)"
+                    }
+                    mic.say(items.isEmpty ? t.nothingInBag : items.joined(separator: ", "), lang: lang)
+                }
+            case .language(let l): setLanguage(l)
+            case .signOut: signOut()
+            }
+            return
+        }
+        busy = true
         Task {
             do {
                 let p = try await api.interpret(hotelId: h, text: text, lang: lang, durationMs: durationMs)
@@ -194,6 +212,9 @@ final class AppState: ObservableObject {
                     }
                     let room = lines.first { $0.roomId != nil }
                     flow = Flow(kind: kind, step: .check, roomId: room?.roomId, roomNumber: room?.roomNumber, lines: lines, proposalId: p.proposalId, transcript: p.transcript)
+                } else if let kind = kind {
+                    // "Take from store" with no items: open that job so they can pick the items.
+                    misses = 0; start(kind); mic.say(t.act(kind).0, lang: lang)
                 } else { missed() }
             } catch let e as ApiError {
                 if e.status == 401 { api.clearSession(); me = nil } else { notice = Notice(text: e.message) }

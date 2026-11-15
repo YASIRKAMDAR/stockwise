@@ -184,6 +184,9 @@ fun HomeScreen(s: AppState) {
                 Spacer(Modifier.width(14.dp))
                 Column { Text(t.holdToTalk, style = MaterialTheme.typography.titleMedium); Text(t.example, style = MaterialTheme.typography.bodyMedium) }
             }
+            Spacer(Modifier.height(8.dp))
+            Text(t.youCanSay, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = C.Ink2)
+            t.examples.drop(1).forEach { Text(it, fontSize = 14.sp, color = C.Ink2) }
         }
         s.outbox.filter { it.error == null }.takeIf { it.isNotEmpty() }?.let { q ->
             Panel(border = C.Marigold, bg = C.MarigoldWash) {

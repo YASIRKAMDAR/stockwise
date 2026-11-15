@@ -125,3 +125,21 @@ func yesNo(_ text: String) -> Bool? {
     if words.contains(where: { yesWords.contains($0) }) { return true }
     return nil
 }
+
+/// Short spoken or typed commands the app handles itself: "my bag", "history", "home", "sign out", a language name.
+enum LocalCommand: Equatable { case go(AppTab), language(String), signOut }
+func localCommand(_ text: String) -> LocalCommand? {
+    let cleaned = text.lowercased().components(separatedBy: CharacterSet(charactersIn: ".,!?।")).joined(separator: " ")
+    let words = cleaned.split(separator: " ").map(String.init)
+    let s = words.joined(separator: " ")
+    if s.isEmpty || words.count > 5 || s.unicodeScalars.contains(where: { CharacterSet.decimalDigits.contains($0) }) { return nil }
+    func has(_ pattern: String) -> Bool { s.range(of: pattern, options: .regularExpression) != nil }
+    if has("sign ?out|log ?out|साइन आउट|लॉग ?आउट|સાઇન આઉટ|લૉગ ?આઉટ") { return .signOut }
+    if has("\\benglish\\b|अंग्रेज़ी|अंग्रेजी|અંગ્રેજી") { return .language("en") }
+    if has("\\bhindi\\b|हिंदी|हिन्दी|હિન્દી|હિંદી") { return .language("hi") }
+    if has("\\bgujarati\\b|गुजराती|ગુજરાતી") { return .language("gu") }
+    if has("\\bhistory\\b|what did i do|इतिहास|हिस्ट्री|ઇતિહાસ|હિસ્ટ્રી") { return .go(.history) }
+    if has("\\bbag\\b|बैग|બેગ") { return .go(.bag) }
+    if has("^(go )?(to )?(the )?home( screen)?$|होम|હોમ") { return .go(.home) }
+    return nil
+}

@@ -111,7 +111,14 @@ class AppState(ctx: Context) {
     /** Text from the mic or the text box → the server works out the job → check screen. */
     fun interpret(text: String, durationMs: Long) = scope.launch {
         val h = hotelId ?: return@launch
-        notice = null; answer = null; busy = true
+        notice = null; answer = null
+        when (val c = localCommand(text)) {
+            is LocalCommand.Go -> { misses = 0; flow = null; tab = c.tab; if (c.tab == Tab.HISTORY) loadHistory(); if (c.tab == Tab.BAG) refresh(); return@launch }
+            is LocalCommand.Language -> { misses = 0; setLanguage(c.lang); return@launch }
+            LocalCommand.SignOut -> { signOut(); return@launch }
+            null -> {}
+        }
+        busy = true
         try {
             val p = api.interpret(h, text, lang, durationMs)
             val kind = Kind.of(p.action)
@@ -128,6 +135,8 @@ class AppState(ctx: Context) {
                     val room = lines.firstOrNull { it.roomId != null }
                     flow = Flow(kind, Step.CHECK, room?.roomId, room?.roomNumber, lines = lines, proposalId = p.proposalId, transcript = p.transcript)
                 }
+                // "Take from store" with no items: open that job so they can pick the items.
+                kind != null -> { misses = 0; start(kind) }
                 else -> missed()
             }
         } catch (e: ApiException) { if (e.status == 401) { store.session = null; me = null } else notice = Notice(e.message) }

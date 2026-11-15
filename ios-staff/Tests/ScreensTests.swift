@@ -105,6 +105,14 @@ final class ScreensTests: XCTestCase {
     func test11History() throws { let s = state(); s.tab = .history; try shot("11-history", s) }
     func test12Gujarati() throws { let s = state(); s.lang = "gu"; try shot("12-home-gujarati", s) }
 
+    func testLocalCommands() {
+        XCTAssertEqual(localCommand("my bag"), .go(.bag))
+        XCTAssertEqual(localCommand("show history"), .go(.history))
+        XCTAssertEqual(localCommand("Sign out"), .signOut)
+        XCTAssertEqual(localCommand("ગુજરાતી"), .language("gu"))
+        XCTAssertNil(localCommand("take two soap from my bag to room 203"))
+        XCTAssertNil(localCommand("room 203 one soap from bag"))
+    }
     func testYesNoWords() {
         XCTAssertEqual(yesNo("haan"), true)
         XCTAssertEqual(yesNo("ના"), false)

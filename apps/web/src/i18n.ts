@@ -2,6 +2,7 @@ export type Lang = 'en' | 'hi' | 'gu';
 export type FlowKind = 'PLACE_IN_ROOM' | 'CHECKOUT_TO_STAFF' | 'RETURN_TO_STORE' | 'SUPPLIER_RECEIPT' | 'TRANSFER_DISPATCH';
 
 const en = {
+  youCanSay: 'You can say', voiceExamples: ['“Put two soaps in room 203”', '“Take ten soap from the store”', '“Return three shampoo”', '“Twenty soap arrived”', '“How many soap are left?”', '“My bag” · “History” · “Sign out”'],
   typeHere: 'Type: room 203, 2 soap', send: 'Send', 
   holdToTalk: 'Hold the mic and say what you did', releaseToSend: 'Release to send', slideToCancel: '◀ Slide to cancel', releaseToCancel: 'Release to cancel', holdHint: 'Keep holding the mic while you speak, then let go.', holdYesNo: 'Hold and say “yes” / “no”', cancelled: 'Cancelled',
   tapInstead: '✋ Tap instead', sayYesNo: 'or say “yes” / “no”', hearingYesNo: 'Listening for yes / no…', backHome: 'Back to start in a moment', twiceFailed: 'Didn’t catch that twice — let’s tap instead.', voiceUnavailable: 'Voice isn’t available on this phone. Tap instead.',
@@ -50,6 +51,7 @@ type Dict = typeof en;
 
 const gu: Dict = {
   ...en,
+  youCanSay: 'તમે બોલી શકો', voiceExamples: ['“રૂમ 203 માં બે સાબુ મૂક્યા”', '“સ્ટોરમાંથી દસ સાબુ લીધા”', '“ત્રણ શેમ્પૂ પરત”', '“વીસ સાબુ આવ્યા”', '“કેટલા સાબુ બચ્યા?”', '“મારી બેગ” · “ઇતિહાસ” · “સાઇન આઉટ”'],
   typeHere: 'લખો: રૂમ 203, 2 સાબુ', send: 'મોકલો', 
   holdToTalk: 'માઇક દબાવી રાખો અને બોલો', releaseToSend: 'મોકલવા છોડો', slideToCancel: '◀ રદ કરવા ડાબે ખસેડો', releaseToCancel: 'રદ કરવા છોડો', holdHint: 'બોલો ત્યાં સુધી માઇક દબાવી રાખો, પછી છોડો.', holdYesNo: 'દબાવી રાખો અને બોલો “હા” / “ના”', cancelled: 'રદ થયું',
   tapInstead: '✋ દબાવીને કરો', sayYesNo: 'અથવા બોલો “હા” / “ના”', hearingYesNo: 'હા / ના સાંભળીએ છીએ…', backHome: 'થોડી વારમાં શરૂઆતમાં', twiceFailed: 'બે વાર સમજાયું નહીં — દબાવીને કરીએ.', voiceUnavailable: 'આ ફોનમાં અવાજ ચાલતો નથી. દબાવીને કરો.',
@@ -97,6 +99,7 @@ const gu: Dict = {
 
 const hi: Dict = {
   ...en,
+  youCanSay: 'आप बोल सकते हैं', voiceExamples: ['“रूम 203 में दो साबुन रखे”', '“स्टोर से दस साबुन लिए”', '“तीन शैम्पू वापस”', '“बीस साबुन आए”', '“कितने साबुन बचे?”', '“मेरा बैग” · “इतिहास” · “साइन आउट”'],
   typeHere: 'लिखें: रूम 203, 2 साबुन', send: 'भेजें', 
   holdToTalk: 'माइक दबाकर रखें और बोलें', releaseToSend: 'भेजने के लिए छोड़ें', slideToCancel: '◀ रद्द करने के लिए बाएँ खिसकाएँ', releaseToCancel: 'रद्द करने के लिए छोड़ें', holdHint: 'बोलते समय माइक दबाकर रखें, फिर छोड़ें।', holdYesNo: 'दबाकर रखें और बोलें “हाँ” / “नहीं”', cancelled: 'रद्द हुआ',
   tapInstead: '✋ दबाकर करें', sayYesNo: 'या बोलें “हाँ” / “नहीं”', hearingYesNo: 'हाँ / नहीं सुन रहे हैं…', backHome: 'थोड़ी देर में शुरुआत पर', twiceFailed: 'दो बार समझ नहीं आया — दबाकर करते हैं।', voiceUnavailable: 'इस फ़ोन पर आवाज़ नहीं चलती। दबाकर करें।',

@@ -28,12 +28,12 @@ function detectAction(t: string) {
   if (has(t, /(start|shuru|शुरू|શરૂ).{0,25}(count|ginti|गिनती|ગણતરી)|(count|ginti|गिनती|ગણતરી).{0,20}(start|shuru|शुरू|શરૂ)/)) return 'START_COUNT';
   if (has(t, /recent changes|show (the )?changes|history|badlav|बदलाव/)) return 'SHOW_CHANGES';
   if (has(t, /kitne|कितने|how many|કેટલા|bache|बचे|left\?|\bleft\b/)) return 'STOCK_QUERY';
-  if (has(t, /pacha|પાછા|wapas|वापस|return/)) return 'RETURN_TO_STORE';
+  if (has(t, /pacha|પાછ|પરત|wapas|vapas|वापस|वापिस|लौटा|return|give back|giving back|put(ting)? back|back (in|to) (the )?store/)) return 'RETURN_TO_STORE';
   if (has(t, /bhej|भेज|મોકલ|\bsent\b|\bsend\b/)) return 'TRANSFER_DISPATCH';
   if (has(t, /rakh|रख|મૂક|placed|\bplace\b|\bput\b/)) return 'PLACE_IN_ROOM';
-  if (has(t, /liye|liya|लिए|लिया|took|taken|લીધ/)) return 'CHECKOUT_TO_STAFF';
+  if (has(t, /liye|liya|\ble (lo|lena|raha|rahi)\b|\blena\b|लिए|लिया|ले लो|लेना|ले रह|took|taken|\btake\b|taking|\bcollect|picked up|pick up|લીધ|લઉં|લેવ|લઈ/)) return 'CHECKOUT_TO_STAFF';
   if (has(t, /(hotel|होटल|હોટેલ).{0,20}(se|से|થી|from).{0,20}(aaye|आए|આવ્યા|received|mila)/) || has(t, /received from hotel/)) return 'TRANSFER_RECEIPT';
-  if (has(t, /aaye|aaya|आए|आया|આવ્યા|આવ્યો|received|arrived|delivered/)) return 'SUPPLIER_RECEIPT';
+  if (has(t, /aaye|aaya|aa gaya|aa gaye|आए|आया|आ गया|आ गए|આવ્યા|આવ્યો|આવી|received|receive|arrived|delivered|delivery|supplier|सप्लायर|સપ્લાયર|new stock|naya maal|नया माल|નવો માલ/)) return 'SUPPLIER_RECEIPT';
   return 'UNKNOWN';
 }
 
@@ -101,6 +101,10 @@ export function fakeParse(input: string, ctx: CatalogContext) {
   let action = detectAction(t);
   // "Room 203, two soap" with no verb: a room plus items means items were put in the room.
   if (action === 'UNKNOWN' && rooms.length && hits.length) action = 'PLACE_IN_ROOM';
+  // "From the store, ten soap" / "store se das sabun" with no verb and no room: taking stock into the bag.
+  if (action === 'UNKNOWN' && !rooms.length && hits.length && /\bstore\b|storeroom|स्टोर|સ્ટોર/.test(t)) action = 'CHECKOUT_TO_STAFF';
+  // A room was named, so "took ... put in room" style sentences are about the room, not the bag.
+  if (action === 'CHECKOUT_TO_STAFF' && rooms.length && hits.length) action = 'PLACE_IN_ROOM';
   const INFO = new Set(['STOCK_QUERY', 'SHOW_ALERTS', 'SHOW_TRANSFERS', 'SHOW_ROOM_USE', 'SHOW_CHANGES', 'START_COUNT']);
   const missingQty = items.some((i) => i.quantity == null) && !INFO.has(action);
   const corrected = toks.some((k) => NEG.test(k.text));

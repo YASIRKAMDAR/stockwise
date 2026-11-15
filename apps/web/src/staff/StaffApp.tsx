@@ -4,7 +4,7 @@ import { api, ApiError, errorText, get, loadDrafts, mutate, NetworkError, saveDr
 import { DICTS, LANG_CODES, LANG_NAMES, speak, type FlowKind, type Lang, type T } from '../i18n';
 import { ACTION_LABEL, ErrorBanner, fmtTime, Loading, StatusBadge, Stepper, useMe } from '../ui/common';
 import { IconArrived, IconBag, IconClock, IconHome, IconMic, IconReceive, IconRepeat, IconReturn, IconRoom, IconSend, IconStop, IconTake } from '../ui/icons';
-import { hasSpeechRecognition, recognize, type Listener } from '../ui/speech';
+import { hasSpeechRecognition, localCommand, recognize, type Listener, type LocalCommand } from '../ui/speech';
 import { Composer } from '../ui/Composer';
 import { BurgerMenu } from '../ui/Menu';
 import { emojiFor, Flow, loadLast, nativeName, type FlowState, type Product } from './Flow';
@@ -40,7 +40,7 @@ export function StaffApp() {
       </header>
       <main className="content">
         {flow ? <Flow key={flow.kind + flow.step + (flow.proposalId ?? '')} init={flow} hotelId={hotelId} lang={lang} t={t} onExit={() => setFlow(null)} />
-          : tab === 'home' ? <Home t={t} lang={lang} hotelId={hotelId} start={start} openReceive={() => setTab('transfers')} />
+          : tab === 'home' ? <Home t={t} lang={lang} hotelId={hotelId} start={start} openReceive={() => setTab('transfers')} command={(c) => { if ('go' in c) setTab(c.go); else if ('lang' in c) changeLang(c.lang); else logout(); }} />
           : tab === 'bag' ? <MyBag t={t} lang={lang} hotelId={hotelId} start={start} />
           : tab === 'transfers' ? <Transfers t={t} hotelId={hotelId} start={start} />
           : <History t={t} hotelId={hotelId} tz={hotel.timezone} />}
@@ -50,7 +50,7 @@ export function StaffApp() {
 }
 
 // ---------------- Home ----------------
-function Home({ t, lang, hotelId, start, openReceive }: { t: T; lang: Lang; hotelId: string; start: (k: FlowKind, extra?: Partial<FlowState>) => void; openReceive: () => void }) {
+function Home({ t, lang, hotelId, start, openReceive, command }: { t: T; lang: Lang; hotelId: string; start: (k: FlowKind, extra?: Partial<FlowState>) => void; openReceive: () => void; command: (c: LocalCommand) => void }) {
   const { me } = useMe();
   const incoming = useQuery<any[]>({ queryKey: ['transfers', hotelId], queryFn: () => get(`/transfers?hotelId=${hotelId}`) });
   const nIncoming = (incoming.data ?? []).filter((x) => x.toHotel.id === hotelId && ['IN_TRANSIT', 'PARTIALLY_RECEIVED'].includes(x.status)).length;
@@ -59,7 +59,7 @@ function Home({ t, lang, hotelId, start, openReceive }: { t: T; lang: Lang; hote
   return (
     <>
       <Drafts t={t} />
-      <Voice t={t} lang={lang} hotelId={hotelId} start={start} openReceive={openReceive} />
+      <Voice t={t} lang={lang} hotelId={hotelId} start={start} openReceive={openReceive} command={command} />
       <p className="small muted" style={{ margin: '4px 0 -6px' }}>{t.orTap}</p>
       <div className="tiles">
         <button className="tile primary-tile" onClick={() => start('PLACE_IN_ROOM')}>
@@ -88,7 +88,7 @@ function Home({ t, lang, hotelId, start, openReceive }: { t: T; lang: Lang; hote
 }
 
 type RecState = 'idle' | 'asking' | 'recording' | 'uploading';
-function Voice({ t, lang, hotelId, start, openReceive }: { t: T; lang: Lang; hotelId: string; start: (k: FlowKind, extra?: Partial<FlowState>) => void; openReceive: () => void }) {
+function Voice({ t, lang, hotelId, start, openReceive, command }: { t: T; lang: Lang; hotelId: string; start: (k: FlowKind, extra?: Partial<FlowState>) => void; openReceive: () => void; command: (c: LocalCommand) => void }) {
   const { me } = useMe();
   const [state, setState] = useState<RecState>('idle');
   const [msg, setMsg] = useState<{ tone: 'warn' | 'bad'; text: string } | null>(null);
@@ -126,6 +126,9 @@ function Voice({ t, lang, hotelId, start, openReceive }: { t: T; lang: Lang; hot
     }
     if (p.action === 'TRANSFER_RECEIPT' || p.action === 'SHOW_TRANSFERS') { openReceive(); return; }
     if (p.status === 'NAVIGATE') { failed(t.voiceFailed); return; }
+    const JOBS = ['PLACE_IN_ROOM', 'CHECKOUT_TO_STAFF', 'RETURN_TO_STORE', 'SUPPLIER_RECEIPT', 'TRANSFER_DISPATCH'];
+    // "Take from store" with no items: open that job so they can pick the items.
+    if (JOBS.includes(p.action) && !p.lines.length) { fails.current = 0; speak(t.act[p.action as FlowKind]?.[0] ?? '', lang); start(p.action as FlowKind); return; }
     if (p.action === 'UNKNOWN' || !p.lines.length) { failed(t.voiceFailed); return; }
     fails.current = 0;
     const room = p.lines.find((l: any) => l.roomId);
@@ -136,6 +139,10 @@ function Voice({ t, lang, hotelId, start, openReceive }: { t: T; lang: Lang; hot
     });
   };
   const send = async (blob: Blob, durationMs: number, name = 'speech') => {
+    if (blob.type === 'text/plain') {
+      const c = localCommand(await blob.text());
+      if (c) { fails.current = 0; setState('idle'); command(c); return; }
+    }
     setState('uploading');
     const fd = new FormData();
     fd.append('hotelId', hotelId); fd.append('preferredLanguage', LANG_CODES[lang]); fd.append('durationMs', String(durationMs));
@@ -198,8 +205,12 @@ function Voice({ t, lang, hotelId, start, openReceive }: { t: T; lang: Lang; hot
     <>
       <section className="voice-intro">
         <span className="dot" aria-hidden="true"><IconMic /></span>
-        <div><b style={{ fontSize: '1.08rem' }}>{t.holdToTalk}</b><div className="small muted">{t.examples[0]}</div></div>
+        <div><b style={{ fontSize: '1.08rem' }}>{t.holdToTalk}</b><div className="small muted">{t.voiceExamples[0]}</div></div>
       </section>
+      <details className="small cansay">
+        <summary>{t.youCanSay}…</summary>
+        <ul>{t.voiceExamples.map((x) => <li key={x}>{x}</li>)}</ul>
+      </details>
       {msg && <div className={`banner ${msg.tone}`} role="alert">{msg.text}</div>}
       {query && (
         <div className="panel">
