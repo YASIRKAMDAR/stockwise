@@ -64,6 +64,7 @@ fun CountScreen(s: AppState, mic: Mic) {
     }
     val done = sheet.lines.count { it.physicalQty != null }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        LatestReply(s)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(t.progress(done, sheet.lines.size), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = C.Ink2, modifier = Modifier.weight(1f))
             if (s.countSaving) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = C.Indigo)

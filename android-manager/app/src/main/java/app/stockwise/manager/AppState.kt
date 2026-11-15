@@ -124,7 +124,7 @@ class AppState(ctx: Context, apiBase: String = BuildConfig.API_BASE) {
             }
         } catch (e: Exception) { handle(e) }
     }
-    fun go(to: Tab) { tab = to; scope.launch { loadTab(to) } }
+    fun go(to: Tab) { if (to != tab) chat = emptyList(); tab = to; scope.launch { loadTab(to) } }
     private fun handle(e: Exception) {
         when (e) {
             is ApiException -> if (e.status == 401) { store.session = null; me = null } else notice = Notice(e.message)

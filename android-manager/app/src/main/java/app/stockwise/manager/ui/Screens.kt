@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material.icons.filled.Apartment
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -174,15 +175,15 @@ fun Shell(s: AppState, mic: Mic, drawerOpen: Boolean = false) {
             }
             HorizontalDivider(color = C.Line)
             Box(Modifier.weight(1f)) {
-                when (s.tab) {
-                    Tab.TODAY -> TodayScreen(s)
-                    Tab.COUNT -> CountScreen(s, mic)
-                    Tab.STOCK -> StockScreen(s)
-                    Tab.DELIVERIES -> DeliveriesScreen(s)
-                    Tab.ACTIVITY -> ActivityScreen(s)
-                    Tab.ATTEMPTS -> AttemptsScreen(s)
+                when {
+                    s.chat.isNotEmpty() && s.tab != Tab.COUNT -> ChatScreen(s)
+                    s.tab == Tab.TODAY -> TodayScreen(s)
+                    s.tab == Tab.COUNT -> CountScreen(s, mic)
+                    s.tab == Tab.STOCK -> StockScreen(s)
+                    s.tab == Tab.DELIVERIES -> DeliveriesScreen(s)
+                    s.tab == Tab.ACTIVITY -> ActivityScreen(s)
+                    else -> AttemptsScreen(s)
                 }
-                if (s.chat.isNotEmpty()) ChatPanel(s, Modifier.align(Alignment.BottomCenter))
             }
             s.notice?.let { Banner(it.text, it.warn, Modifier.padding(horizontal = 12.dp, vertical = 4.dp).clickable { s.notice = null }) }
             VoiceBar(s, mic)
@@ -232,20 +233,39 @@ fun VoiceBar(s: AppState, mic: Mic) {
     )
 }
 
-/** Voice answers float above the bar on any screen, newest at the bottom. */
+/** The conversation as its own screen: what was asked on the right, answers on the left, newest at the bottom; one-tap ways back. */
 @Composable
-fun ChatPanel(s: AppState, modifier: Modifier = Modifier) {
+fun ChatScreen(s: AppState) {
     val t = s.t
     val list = rememberLazyListState()
-    LaunchedEffect(s.chat.size) { if (s.chat.isNotEmpty()) list.animateScrollToItem(s.chat.size - 1) }
-    Column(modifier.fillMaxWidth().background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(C.Linen.copy(alpha = 0f), C.Linen, C.Linen))).padding(top = 8.dp)) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.End) {
-            Box(Modifier.size(32.dp).clip(CircleShape).background(C.Paper).border(1.dp, C.Line, CircleShape).clickable { s.clearChat() }, contentAlignment = Alignment.Center) { Icon(Icons.Filled.Close, t.close, tint = C.Ink2, modifier = Modifier.size(16.dp)) }
-        }
-        LazyColumn(Modifier.heightIn(max = 300.dp).padding(horizontal = 12.dp), state = list, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    LaunchedEffect(s.chat.size, s.busy) { list.animateScrollToItem(s.chat.size + 1) }
+    Column(Modifier.fillMaxSize()) {
+        LazyColumn(Modifier.weight(1f).padding(horizontal = 12.dp), state = list, verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(vertical = 10.dp)) {
             items(s.chat, key = { it.id }) { m -> ChatRow(s, m) }
+            if (s.busy) item { AppBubble { Row(verticalAlignment = Alignment.CenterVertically) { CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = C.Indigo); Spacer(Modifier.width(10.dp)); Text(if (s.waitingLong) t.stillAsking else t.understanding, color = C.Ink2) } } }
             item { Spacer(Modifier.height(4.dp)) }
         }
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Chip("☀️ ${t.today}") { s.clearChat(); s.go(Tab.TODAY) }
+            Chip("📋 ${t.count}") { s.clearChat(); s.go(Tab.COUNT) }
+            Chip("🚚 ${t.deliveries}") { s.clearChat(); s.go(Tab.DELIVERIES) }
+            Chip("🕘 ${t.activity}") { s.clearChat(); s.go(Tab.ACTIVITY) }
+        }
+    }
+}
+
+@Composable
+fun Chip(text: String, onClick: () -> Unit) {
+    Text(text, Modifier.clip(RoundedCornerShape(20.dp)).background(C.Paper).border(1.dp, C.Line, RoundedCornerShape(20.dp)).clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 9.dp), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = C.Ink, maxLines = 1)
+}
+
+/** On the count screen the latest reply (what was heard, or a problem) sits inline at the top instead of covering the sheet. */
+@Composable
+fun LatestReply(s: AppState) {
+    val m = s.chat.lastOrNull { it.role == Role.APP } ?: return
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        ChatRow(s, m)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { Chip("✕ ${s.t.close}") { s.clearChat() } }
     }
 }
 
