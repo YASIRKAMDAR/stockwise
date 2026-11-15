@@ -87,7 +87,7 @@ class EndToEndTest {
     private fun waitFor(s: AppState, what: String, timeout: Long = 10_000, cond: () -> Boolean) {
         val end = System.currentTimeMillis() + timeout
         while (!cond()) {
-            if (System.currentTimeMillis() > end) throw AssertionError("Timed out waiting for $what. loginError=${s.loginError} notice=${s.notice} busy=${s.busy} chat=${s.chat.map { it.body::class.simpleName }} flow=${s.flow?.step} notice2=${s.notice} nudge=${s.nudgeTap} requests=${received.map { "${it.method} ${it.path}" }}")
+            if (System.currentTimeMillis() > end) throw AssertionError("Timed out waiting for $what. loginError=${s.loginError} notice=${s.notice} busy=${s.busy} chat=${s.chat.map { it.body::class.simpleName }} flow=${s.flow?.step} decision=${s.lastDecision} error=${s.lastError?.take(600)} requests=${received.map { "${it.method} ${it.path}" }}")
             org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
             rule.waitForIdle()
             Thread.sleep(25)

@@ -44,6 +44,9 @@ class AppState(ctx: Context, apiBase: String = BuildConfig.API_BASE) {
     var busy by mutableStateOf(false)
     var loginError by mutableStateOf<String?>(null)
     var nudgeTap by mutableStateOf(false)
+    /** Last unexpected error and last decision in the voice pipeline (for tests and support; never shown to staff). */
+    var lastError: String? = null
+    var lastDecision: String? = null
     /** The conversation on the home screen: what was said, what the app understood, what was saved. */
     var chat by mutableStateOf<List<ChatMessage>>(emptyList())
     fun post(body: ChatBody, role: Role = Role.APP) { chat = (chat + ChatMessage(role, body)).takeLast(40) }
@@ -190,7 +193,7 @@ class AppState(ctx: Context, apiBase: String = BuildConfig.API_BASE) {
             if ("FALLBACK_RULES" in p.warnings) post(ChatBody.Text(t.fromPhoneWords, true))
             val kind = Kind.of(p.action)
             when {
-                p.status == "QUERY_RESULT" -> { post(ChatBody.Stock(p.queryResult ?: emptyList())); misses = 0 }
+                p.status == "QUERY_RESULT" -> { lastDecision = "stock"; post(ChatBody.Stock(p.queryResult ?: emptyList())); misses = 0 }
                 kind != null && p.lines.isNotEmpty() -> {
                     misses = 0
                     val lines = p.lines.map { l ->
@@ -201,12 +204,13 @@ class AppState(ctx: Context, apiBase: String = BuildConfig.API_BASE) {
                     }
                     val room = lines.firstOrNull { it.roomId != null }
                     val f = Flow(kind, Step.CHECK, room?.roomId, room?.roomNumber, lines = lines, proposalId = p.proposalId, transcript = p.transcript)
+                    lastDecision = "job kind=$kind lines=${lines.size} blocked=${blocked(f)}"
                     // Something to pick (unknown item, no room): the full check screen has the pickers. Otherwise a card in the thread.
                     if (blocked(f)) flow = f else post(ChatBody.Job(f))
                 }
                 // "Take from store" with no items: open that job so they can pick the items.
-                kind != null -> { misses = 0; start(kind) }
-                else -> missed()
+                kind != null -> { lastDecision = "start $kind"; misses = 0; start(kind) }
+                else -> { lastDecision = "missed status=${p.status} action=${p.action} lines=${p.lines.size}"; missed() }
             }
         } catch (e: ApiException) {
             when {
@@ -216,6 +220,7 @@ class AppState(ctx: Context, apiBase: String = BuildConfig.API_BASE) {
             }
         }
         catch (e: OfflineException) { if (fromRecording) post(ChatBody.Retry(heard)) else post(ChatBody.Text(t.noVoice, true)) }
+        catch (e: Exception) { lastError = e.stackTraceToString(); post(ChatBody.Text(e.message ?: "Error", true)) }
         waiter.cancel(); waitingLong = false
         busy = false
     }

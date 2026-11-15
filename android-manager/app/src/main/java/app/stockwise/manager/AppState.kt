@@ -263,8 +263,9 @@ class AppState(ctx: Context, apiBase: String = BuildConfig.API_BASE) {
         try {
             val p = call()
             val tag = langCode(p.detectedLanguage)
-            if (bubbleId != null) chat = chat.map { m ->
-                if (m.id != bubbleId) m else { val said = m.body as ChatBody.Said; m.copy(body = said.copy(text = p.transcript.ifBlank { said.text }, lang = tag)) }
+            val target = bubbleId ?: chat.lastOrNull { it.role == Role.ME }?.id
+            if (target != null) chat = chat.map { m ->
+                if (m.id != target) m else { val said = m.body as ChatBody.Said; m.copy(body = said.copy(text = if (bubbleId != null) p.transcript.ifBlank { said.text } else said.text, lang = tag)) }
             }
             if (bubbleId != null) localCommand(p.transcript)?.let { applyLocal(it); return }
             if ("FALLBACK_RULES" in p.warnings) post(ChatBody.Text(t.fromPhoneWords, true))
