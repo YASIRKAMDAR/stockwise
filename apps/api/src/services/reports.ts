@@ -1,6 +1,7 @@
 import type { Db } from '../db/pool.ts';
 import type { Actor } from './actor.ts';
 import { listTransfers } from './transfers.ts';
+import { listRequests, warehouseOf } from './requests.ts';
 
 /** Store / staff-held / in-transit balances per hotel × product. These are STOCK (balances). */
 export async function stockMatrix(db: Db, orgId: string, hotelIds: string[]) {
@@ -132,6 +133,9 @@ export async function roomPlacements(db: Db, orgId: string, hotelIds: string[], 
 }
 
 export async function alerts(db: Db, actor: Actor, hotelIds: string[]) {
+  const wh = await warehouseOf(db, actor.orgId);
+  const whStock = wh ? await stockMatrix(db, actor.orgId, [wh.id]) : [];
+  const openRequests = wh ? await listRequests(db, actor, hotelIds, 'OPEN').catch(() => []) : [];
   const [matrix, counts, transfers, variances, corrections, voice] = await Promise.all([
     stockMatrix(db, actor.orgId, hotelIds),
     countStatus(db, actor.orgId, hotelIds),
@@ -147,9 +151,17 @@ export async function alerts(db: Db, actor: Actor, hotelIds: string[]) {
   ]);
   type Alert = { id: string; severity: 'HIGH' | 'MEDIUM' | 'LOW'; category: string; hotelId: string; title: string; detail: string; createdAt?: string };
   const out: Alert[] = [];
-  for (const m of matrix.filter((m) => m.low))
-    out.push({ id: `low:${m.hotelId}:${m.productId}`, severity: m.store === 0 ? 'HIGH' : 'MEDIUM', category: 'LOW_STOCK', hotelId: m.hotelId,
-      title: `${m.name} ${m.store === 0 ? 'out of stock' : 'low'} at ${m.hotelName}`, detail: `Store ${m.store} ${m.unit}, reorder at ${m.reorderThreshold}` });
+  for (const m of matrix.filter((m) => m.low)) {
+    const atWarehouse = wh && m.hotelId !== wh.id ? whStock.find((w) => w.productId === m.productId)?.store : undefined;
+    const alreadyAsked = openRequests.some((r) => r.hotel.id === m.hotelId && r.lines.some((l: any) => l.productId === m.productId));
+    out.push({ id: `low:${m.hotelId}:${m.productId}`, severity: m.store === 0 ? 'HIGH' : 'MEDIUM', category: alreadyAsked ? 'LOW_STOCK_REQUESTED' : atWarehouse != null ? 'LOW_STOCK_ASK_WAREHOUSE' : 'LOW_STOCK', hotelId: m.hotelId,
+      title: `${m.name} ${m.store === 0 ? 'out of stock' : 'low'} at ${m.hotelName}`,
+      detail: `Store ${m.store} ${m.unit}, reorder at ${m.reorderThreshold}` + (atWarehouse != null ? ` · warehouse has ${atWarehouse}` : '') + (alreadyAsked ? ' · request sent' : '') });
+  }
+  if (wh && hotelIds.includes(wh.id))
+    for (const r of openRequests)
+      out.push({ id: `req:${r.id}`, severity: r.lines.some((l: any) => l.warehouseStock < l.quantity) ? 'MEDIUM' : 'LOW', category: 'STOCK_REQUEST', hotelId: wh.id,
+        title: `${r.hotel.name} asks for ${r.lines.map((l: any) => `${l.quantity} ${l.name}`).join(', ')}`, detail: `Asked ${Math.round(r.ageHours)}h ago by ${r.requestedBy}`, createdAt: r.createdAt });
   for (const t of transfers.filter((t) => t.aged || t.status === 'DISCREPANCY'))
     out.push({ id: `tr:${t.id}`, severity: t.status === 'DISCREPANCY' ? 'HIGH' : 'MEDIUM', category: t.status === 'DISCREPANCY' ? 'TRANSFER_DISCREPANCY' : 'TRANSFER_AGED',
       hotelId: t.toHotel.id, title: `Transfer ${t.refCode} ${t.fromHotel.name} → ${t.toHotel.name}`, detail: `${t.outstandingUnits} units not received after ${Math.round(t.ageHours)}h`, createdAt: t.dispatchedAt });

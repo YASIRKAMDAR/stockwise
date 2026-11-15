@@ -6,8 +6,8 @@ import type { Actor } from '../services/actor.ts';
 export async function createOrg(db: Db, name: string) {
   return (await db.query('INSERT INTO organizations (name) VALUES ($1) RETURNING id', [name])).rows[0].id as string;
 }
-export async function createHotel(db: Db, orgId: string, code: string, name: string, tz = 'Asia/Kolkata') {
-  return (await db.query('INSERT INTO hotels (organization_id, code, name, timezone) VALUES ($1,$2,$3,$4) RETURNING id', [orgId, code, name, tz])).rows[0].id as string;
+export async function createHotel(db: Db, orgId: string, code: string, name: string, tz = 'Asia/Kolkata', kind: 'HOTEL' | 'WAREHOUSE' = 'HOTEL') {
+  return (await db.query('INSERT INTO hotels (organization_id, code, name, timezone, kind) VALUES ($1,$2,$3,$4,$5) RETURNING id', [orgId, code, name, tz, kind])).rows[0].id as string;
 }
 export async function createRooms(db: Db, hotelId: string, numbers: string[]) {
   const out: Record<string, string> = {};

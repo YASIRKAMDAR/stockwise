@@ -7,6 +7,7 @@ import { stockMatrix } from '../services/reports.ts';
 import { fakeParse, normalizeDigits } from './fake.ts';
 import type { CatalogContext } from './prompt.ts';
 import type { VoiceProvider } from './provider.ts';
+import { warehouseOf } from '../services/requests.ts';
 
 export const ALLOWED_AUDIO = new Set(['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/aac', 'audio/flac', 'audio/mp3']);
 const LARGE_QTY = 200;
@@ -149,6 +150,11 @@ export async function interpret(db: Db, cfg: Config, provider: VoiceProvider | n
       if (l.productId && (bag.get(l.productId) ?? 0) >= (need.get(l.productId) ?? Infinity)) l.source = 'MY_STOCK';
       else l.issues.push('CHOOSE_SOURCE');
     }
+  }
+  if (out.action === 'REQUEST_FROM_WAREHOUSE') {
+    const wh = await warehouseOf(db, actor.orgId);
+    if (!wh) warnings.push('NO_WAREHOUSE');
+    else if (wh.id === input.hotelId) warnings.push('SAME_HOTEL');
   }
   if (out.action === 'TRANSFER_DISPATCH') {
     if (!targetHotel) warnings.push('CHOOSE_DESTINATION_HOTEL');

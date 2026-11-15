@@ -7,6 +7,7 @@ import { hashRequest, idempotent } from './idempotency.ts';
 import { postEvent } from './ledger.ts';
 import { storeLocation, transitLocation } from './locations.ts';
 import { markProposalConsumed } from './transactions.ts';
+import { closeRequestForTransfer } from './requests.ts';
 
 type CreateBody = z.infer<typeof CreateTransferBody> & { proposalId?: string };
 type ReceiveBody = z.infer<typeof ReceiveTransferBody> & { final?: boolean };
@@ -105,6 +106,7 @@ export async function receiveTransfer(db: Db, actor: Actor, transferId: string, 
     for (const l of lines) await tx.query('UPDATE transfer_lines SET received_qty = $3 WHERE transfer_id = $1 AND product_id = $2', [transferId, l.product_id, l.received_qty]);
     const status = nextStatus(lines, !!body.final, t.status);
     await tx.query('UPDATE transfers SET status = $2 WHERE id = $1', [transferId, status]);
+    if (status === 'RECEIVED' || status === 'RESOLVED') await closeRequestForTransfer(tx, transferId);
     const outstanding = lines.reduce((s, l) => s + l.sent_qty - l.received_qty - l.resolved_short_qty, 0);
     return { status: 201, body: { ...out, state: 'COMMITTED' as const, transferId, status, outstandingUnits: outstanding } };
   });
@@ -128,6 +130,7 @@ export async function resolveTransfer(db: Db, actor: Actor, transferId: string, 
     });
     for (const m of movements) await tx.query('UPDATE transfer_lines SET resolved_short_qty = resolved_short_qty + $3 WHERE transfer_id = $1 AND product_id = $2', [transferId, m.productId, m.quantity]);
     await tx.query(`UPDATE transfers SET status = 'RESOLVED' WHERE id = $1`, [transferId]);
+    await closeRequestForTransfer(tx, transferId);
     return { status: 201, body: { ...out, state: 'COMMITTED' as const, transferId, status: 'RESOLVED', resolvedUnits: movements.reduce((s, m) => s + m.quantity, 0) } };
   });
 }

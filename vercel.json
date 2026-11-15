@@ -2,5 +2,11 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "node scripts/build-vercel.mjs",
   "installCommand": "npm ci --include=dev",
-  "framework": null
+  "framework": null,
+  "crons": [
+    {
+      "path": "/api/v1/internal/run-schedules",
+      "schedule": "5 * * * *"
+    }
+  ]
 }

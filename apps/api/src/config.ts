@@ -6,6 +6,8 @@ const Env = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   DATABASE_URL: z.string().min(1),
   SESSION_SECRET: z.string().min(32, 'SESSION_SECRET must be at least 32 chars'),
+  /** Shared secret for the scheduler endpoint (Vercel Cron sends it as a Bearer token). Empty disables the endpoint. */
+  CRON_SECRET: z.string().default(''),
   APP_BASE_URL: z.string().url().default('http://localhost:5173'),
   API_PORT: z.coerce.number().int().default(3000),
   API_HOST: z.string().default('0.0.0.0'),

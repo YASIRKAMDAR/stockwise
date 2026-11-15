@@ -20,6 +20,7 @@ const owner = systemActor(orgId, ownerId);
 console.log('\nDEMO data created (sample only — do not use in production).');
 console.log(`  Owner:    OWNER / ${DEMO_PW}`);
 console.log(`  Managers: MGR1, MGR2, MGR3 / ${DEMO_PW}`);
+console.log(`  Warehouse: WHMGR / ${DEMO_PW} (Central Warehouse; H2 and H3 have requests pending)`);
 console.log(`  Staff:    S101, S102 (Hotel 1), S201, S202 (Hotel 2), S301, S302 (Hotel 3) / PIN ${DEMO_PIN}`);
 console.log('  Staff PIN login needs an enrolled device: sign in as a manager on the phone and use "Enroll this device for staff".');
 if (process.argv.includes('--print-device')) {

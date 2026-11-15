@@ -32,6 +32,8 @@ export const VOICE_ACTIONS = [
   'RETURN_TO_STORE',
   'TRANSFER_DISPATCH',
   'TRANSFER_RECEIPT',
+  // A hotel asking the central warehouse for stock. Nothing moves until the warehouse sends.
+  'REQUEST_FROM_WAREHOUSE',
   'STOCK_QUERY',
   // Requests from managers/owners that open a screen; never change stock.
   'SHOW_ALERTS',

@@ -29,6 +29,7 @@ function detectAction(t: string) {
   if (has(t, /recent changes|show (the )?changes|history|badlav|बदलाव/)) return 'SHOW_CHANGES';
   if (has(t, /kitne|कितने|how many|કેટલા|bache|बचे|left\?|\bleft\b/)) return 'STOCK_QUERY';
   if (has(t, /pacha|પાછ|પરત|wapas|vapas|वापस|वापिस|लौटा|return|give back|giving back|put(ting)? back|back (in|to) (the )?store/)) return 'RETURN_TO_STORE';
+  if (has(t, /warehouse|godown|गोदाम|ગોડાઉન|ware ?house|वेयरहाउस|વેરહાઉસ/) && has(t, /mang|मांग|માંગ|मंगवा|મંગાવ|ask|request|order|chahiye|चाहिए|જોઈએ|bhej|भेज|મોકલ|send|from|se\b|से|થી|ma ?thi|માંથી/)) return 'REQUEST_FROM_WAREHOUSE';
   if (has(t, /bhej|भेज|મોકલ|\bsent\b|\bsend\b/)) return 'TRANSFER_DISPATCH';
   if (has(t, /rakh|रख|મૂક|placed|\bplace\b|\bput\b/)) return 'PLACE_IN_ROOM';
   if (has(t, /liye|liya|\ble (lo|lena|raha|rahi)\b|\blena\b|लिए|लिया|ले लो|लेना|ले रह|took|taken|\btake\b|taking|\bcollect|picked up|pick up|લીધ|લઉં|લેવ|લઈ/)) return 'CHECKOUT_TO_STAFF';

@@ -16,6 +16,7 @@ import { requireKey } from '../services/idempotency.ts';
 import * as reports from '../services/reports.ts';
 import { createTransaction, reverseTransaction } from '../services/transactions.ts';
 import { dispatchTransfer, listTransfers, receiveTransfer, resolveTransfer } from '../services/transfers.ts';
+import { createRequest, declineRequest, deleteSchedule, dispatchRequest, listRequests, listSchedules, runDueSchedules, topUpLines, upsertSchedule, warehouseOf } from '../services/requests.ts';
 import { interpret, myVoiceAttempts, voiceHealth, voiceUsage } from '../voice/service.ts';
 import type { VoiceProvider } from '../voice/provider.ts';
 
@@ -54,11 +55,13 @@ export async function registerRoutes(app: FastifyInstance, { db, cfg, provider }
   app.get('/me', async (req) => {
     const a = requireActor(req);
     const ids = await visibleHotelIds(db, a);
-    const hotels = (await db.query('SELECT id, name, code, timezone, allow_store_to_room FROM hotels WHERE id = ANY($1::uuid[]) ORDER BY code', [ids])).rows;
+    const hotels = (await db.query('SELECT id, name, code, timezone, allow_store_to_room, kind FROM hotels WHERE id = ANY($1::uuid[]) ORDER BY (kind = \'WAREHOUSE\') DESC, code', [ids])).rows;
+    const wh = await warehouseOf(db, a.orgId);
     const role = a.authMethod === 'PIN' ? 'STAFF' : a.isOwner ? 'OWNER' : a.memberships.some((m) => m.role === 'MANAGER') ? 'MANAGER' : 'STAFF';
     return {
       id: a.userId, displayName: a.displayName, employeeCode: a.employeeCode, role, authMethod: a.authMethod, language: a.preferredLanguage,
-      hotels: hotels.map((h) => ({ id: h.id, name: h.name, code: h.code, timezone: h.timezone, allowStoreToRoom: h.allow_store_to_room, roles: [...rolesAt(a, h.id)] })),
+      hotels: hotels.map((h) => ({ id: h.id, name: h.name, code: h.code, timezone: h.timezone, allowStoreToRoom: h.allow_store_to_room, kind: h.kind, roles: [...rolesAt(a, h.id)] })),
+      warehouseId: wh?.id ?? null,
       activeHotel: a.activeHotelId, deviceId: a.deviceId,
       config: { voiceProvider: provider?.name ?? 'disabled', voiceMaxSeconds: cfg.VOICE_MAX_SECONDS, ownerPollSeconds: cfg.OWNER_POLL_INTERVAL_SECONDS },
     };
@@ -318,6 +321,64 @@ export async function registerRoutes(app: FastifyInstance, { db, cfg, provider }
   });
 
   // ---------------- Transfers ----------------
+  // ---- Requests to the warehouse ----
+  const RequestBody = z.object({ hotelId: uuid, lines: z.array(z.object({ productId: uuid, quantity: z.number().int().positive() })).min(1), note: z.string().max(500).nullish() });
+  app.post('/requests', async (req, reply) => {
+    const a = requireActor(req);
+    return send(reply, await createRequest(db, a, parse(RequestBody, req.body)));
+  });
+  app.get('/requests', async (req) => {
+    const a = requireActor(req);
+    const q = Q(req);
+    const ids = q.hotelId && q.hotelId !== 'all' ? [parse(uuid, q.hotelId)] : await visibleHotelIds(db, a);
+    for (const h of ids) await requireHotel(db, a, h);
+    return listRequests(db, a, ids, q.status);
+  });
+  app.get('/requests/top-up', async (req) => {
+    // What this hotel would ask for to get back to par, so the app can pre-fill a request.
+    const a = requireActor(req);
+    const hotelId = parse(uuid, Q(req).hotelId);
+    await requireHotel(db, a, hotelId);
+    const wh = await warehouseOf(db, a.orgId);
+    if (!wh) throw err('INVALID_INPUT', 'No warehouse is set up');
+    return { warehouse: wh, lines: await topUpLines(db, a.orgId, hotelId, wh.id) };
+  });
+  app.post('/requests/:id/dispatch', async (req, reply) => {
+    const a = requireActor(req);
+    const key = idem(req);
+    const body = parse(z.object({ lines: z.array(z.object({ productId: uuid, quantity: z.number().int().nonnegative() })).optional(), note: z.string().max(500).nullish() }), req.body ?? {});
+    return send(reply, await dispatchRequest(db, a, parse(uuid, (req.params as any).id), body, key));
+  });
+  app.post('/requests/:id/decline', async (req) => {
+    const a = requireActor(req);
+    const body = parse(z.object({ note: z.string().max(500).nullish() }), req.body ?? {});
+    return declineRequest(db, a, parse(uuid, (req.params as any).id), body.note);
+  });
+  app.get('/request-schedules', async (req) => {
+    const a = requireActor(req);
+    const q = Q(req);
+    const ids = q.hotelId && q.hotelId !== 'all' ? [parse(uuid, q.hotelId)] : await visibleHotelIds(db, a);
+    for (const h of ids) await requireHotel(db, a, h);
+    return listSchedules(db, a, ids);
+  });
+  app.post('/request-schedules', async (req, reply) => {
+    const a = requireActor(req);
+    const body = parse(z.object({ hotelId: uuid, weekday: z.number().int().min(0).max(6), hour: z.number().int().min(0).max(23).default(7), active: z.boolean().optional() }), req.body);
+    return send(reply, { status: 201, body: await upsertSchedule(db, a, body) });
+  });
+  app.delete('/request-schedules/:id', async (req) => deleteSchedule(db, requireActor(req), parse(uuid, (req.params as any).id)));
+  // Vercel Cron (or anyone with the secret) pokes this hourly; each due schedule creates its top-up request once.
+  app.post('/internal/run-schedules', async (req, reply) => {
+    const auth = String(req.headers.authorization ?? '');
+    if (!cfg.CRON_SECRET || auth !== `Bearer ${cfg.CRON_SECRET}`) return reply.code(401).send({ error: { code: 'UNAUTHORIZED', message: 'Cron secret required' } });
+    return runDueSchedules(db);
+  });
+  app.get('/internal/run-schedules', async (req, reply) => {
+    const auth = String(req.headers.authorization ?? '');
+    if (!cfg.CRON_SECRET || auth !== `Bearer ${cfg.CRON_SECRET}`) return reply.code(401).send({ error: { code: 'UNAUTHORIZED', message: 'Cron secret required' } });
+    return runDueSchedules(db);
+  });
+
   app.post('/transfers', async (req, reply) => {
     const a = requireActor(req);
     const key = idem(req);
