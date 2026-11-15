@@ -181,7 +181,7 @@ struct CheckStep: View {
         let t = s.t
         let fromVoice = f.proposalId != nil
         let blocked = s.blocked(f)
-        let canSay = fromVoice && !blocked && s.mic.available(lang: s.lang)
+        let canSay = fromVoice && !blocked && s.yesNoLang != nil
         let room = f.lines.first { $0.roomNumber != nil }?.roomNumber
         VStack(alignment: .leading, spacing: 12) {
             StepHead(f: f, title: t.check) {

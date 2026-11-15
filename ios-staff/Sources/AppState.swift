@@ -362,11 +362,13 @@ final class AppState: ObservableObject {
     }
 
     /// Hold the small mic on the check screen and say yes / no.
+    /// Gujarati has no iPhone recognizer; Hindi hears હા / ના as हां / ना, which yesNo accepts.
+    var yesNoLang: String? { mic.available(lang: lang) ? lang : mic.available(lang: "hi") ? "hi" : nil }
     func yesNoStart() {
-        guard mic.available(lang: lang) else { return }
+        guard let yl = yesNoLang else { return }
         guard mic.hasPermission() else { mic.requestPermission { _ in }; return }
         hearingYesNo = true
-        mic.start(lang: lang, onInterim: { _ in }, onDone: { [weak self] text in
+        mic.start(lang: yl, onInterim: { _ in }, onDone: { [weak self] text in
             guard let self = self else { return }
             self.hearingYesNo = false
             guard let text = text, let answer = yesNo(text) else { return }

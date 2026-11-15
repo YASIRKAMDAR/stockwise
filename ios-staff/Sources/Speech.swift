@@ -34,7 +34,15 @@ final class SpeechMic: NSObject, Mic {
     private var cancelled = false
     private var finished = true
     private var recording = false
-    private var file: AVAudioFile?
+    /// The recording is shared with the audio thread; closing it under the lock writes the file's index so it can be played back.
+    private final class Recording {
+        private let lock = NSLock()
+        private var file: AVAudioFile?
+        func open(_ f: AVAudioFile?) { lock.lock(); file = f; lock.unlock() }
+        func write(_ b: AVAudioPCMBuffer) { lock.lock(); try? file?.write(from: b); lock.unlock() }
+        func close() { lock.lock(); file = nil; lock.unlock() }
+    }
+    private let rec = Recording()
     private var fileURL: URL?
     private var recorded: Data?
     private var generation = 0
@@ -63,7 +71,7 @@ final class SpeechMic: NSObject, Mic {
         let gen = generation
         self.onDone = onDone
         latest = ""; cancelled = false; finished = false
-        recording = record; recorded = nil; file = nil; fileURL = nil
+        recording = record; recorded = nil; rec.close(); fileURL = nil
         let recognizer = SFSpeechRecognizer(locale: Locale(identifier: localeTag(lang)))
         let canRecognize = (recognizer?.isAvailable ?? false) && SFSpeechRecognizer.authorizationStatus() == .authorized
         if !canRecognize && !record { finish(gen); return }
@@ -77,19 +85,19 @@ final class SpeechMic: NSObject, Mic {
             let input = engine.inputNode
             let format = input.outputFormat(forBus: 0)
             if format.sampleRate == 0 || format.channelCount == 0 { finish(gen); return }
-            var out: AVAudioFile? = nil
             if record {
                 let url = FileManager.default.temporaryDirectory.appendingPathComponent("stockwise-voice.m4a")
                 try? FileManager.default.removeItem(at: url)
                 let settings: [String: Any] = [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: format.sampleRate,
                                                AVNumberOfChannelsKey: format.channelCount, AVEncoderBitRateKey: 48000]
-                out = try? AVAudioFile(forWriting: url, settings: settings, commonFormat: format.commonFormat, interleaved: format.isInterleaved)
-                file = out; fileURL = url
+                rec.open(try? AVAudioFile(forWriting: url, settings: settings, commonFormat: format.commonFormat, interleaved: format.isInterleaved))
+                fileURL = url
             }
             input.removeTap(onBus: 0)
+            let rec = self.rec
             input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
                 req?.append(buffer)
-                try? out?.write(from: buffer)
+                if record { rec.write(buffer) }
             }
             engine.prepare()
             try engine.start()
@@ -115,7 +123,8 @@ final class SpeechMic: NSObject, Mic {
         let gen = generation
         stopAudio()
         request?.endAudio()
-        if task == nil { finish(gen); return }
+        // No live recognizer (e.g. Gujarati on iPhone) and nothing to record: done now.
+        if task == nil && !recording { finish(gen); return }
         DispatchQueue.main.asyncAfter(deadline: .now() + (recording ? 0.6 : 1.5)) { [weak self] in self?.finish(gen) }
     }
 
@@ -137,7 +146,7 @@ final class SpeechMic: NSObject, Mic {
         stopAudio()
         if recording { task?.cancel() }
         task = nil; request = nil
-        file = nil   // closes the recording
+        rec.close()   // finishes the m4a so Google can read it
         if recording, !cancelled, let url = fileURL { recorded = try? Data(contentsOf: url) }
         if let url = fileURL { try? FileManager.default.removeItem(at: url) }
         fileURL = nil
