@@ -95,5 +95,12 @@ class ScreensTest {
         shot("13-check-language-tag", s)
     }
     @Test fun s14_google_slow() { val s = state(); s.retryHeard = ""; shot("14-google-slow", s) }
+    @Test fun s16_intro() { val s = state(); s.showIntro = true; shot("16-intro", s) }
+    @Test fun s17_attempts() {
+        val s = state(); s.tab = Tab.ATTEMPTS
+        s.attempts = listOf(VoiceAttempt("2026-11-15T10:03:46Z", "SUCCESS", language = "mixed", client = "android", inputKind = "audio", latencyMs = 1361, transcript = "Room 203 ma do soap aur ek shampoo mukyu", action = "PLACE_IN_ROOM", confirmed = true),
+            VoiceAttempt("2026-11-15T10:03:30Z", "FAILED", errorCode = "TEMPORARY_UNAVAILABLE", client = "android", inputKind = "audio", latencyMs = 5029))
+        shot("17-voice-attempts", s)
+    }
     @Test fun s15_still_asking() { val s = state(); s.busy = true; s.waitingLong = true; shot("15-still-asking", s) }
 }

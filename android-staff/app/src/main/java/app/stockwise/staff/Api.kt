@@ -55,6 +55,7 @@ class Api(private val store: Store, private val base: String = BuildConfig.API_B
     suspend fun rooms(hotelId: String): List<Room> = json.decodeFromString(raw("GET", "/hotels/$hotelId/rooms"))
     suspend fun bag(hotelId: String): BagResponse = json.decodeFromString(raw("GET", "/me/stock?hotelId=$hotelId"))
     suspend fun store(hotelId: String): StoreResponse = json.decodeFromString(raw("GET", "/hotels/$hotelId/stock"))
+    suspend fun voiceAttempts(): VoiceAttemptsPage = json.decodeFromString(raw("GET", "/me/voice-attempts?limit=10"))
     suspend fun activity(hotelId: String, limit: Int = 20): ActivityPage = json.decodeFromString(raw("GET", "/transactions?hotelId=$hotelId&limit=$limit"))
     suspend fun setLanguage(lang: String) { raw("PATCH", "/me", """{"language":"$lang"}""".toRequestBody(jsonType)) }
     suspend fun logout() { runCatching { raw("POST", "/auth/logout") }; store.session = null }

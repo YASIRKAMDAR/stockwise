@@ -23,6 +23,9 @@ class Store(ctx: Context) {
     var lang: String
         get() = prefs.getString("lang", "en") ?: "en"
         set(v) { prefs.edit().putString("lang", v).apply() }
+    var introSeen: Boolean
+        get() = prefs.getBoolean("introSeen", false)
+        set(v) { prefs.edit().putBoolean("introSeen", v).apply() }
     var lastCode: String
         get() = prefs.getString("lastCode", "") ?: ""
         set(v) { prefs.edit().putString("lastCode", v).apply() }

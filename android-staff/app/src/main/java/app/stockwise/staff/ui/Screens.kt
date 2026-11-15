@@ -14,6 +14,12 @@ import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
+import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.TouchApp
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.ui.draw.scale
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material3.*
@@ -30,6 +36,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.stockwise.staff.*
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.OffsetDateTime
 import java.time.ZoneId
@@ -113,10 +120,13 @@ fun Shell(s: AppState, mic: Mic, drawerOpen: Boolean = false) {
                 Text(s.hotel?.name ?: "", style = MaterialTheme.typography.bodyMedium)
             }
             HorizontalDivider(color = C.Line)
-            val go = { tab: Tab -> s.flow = null; s.tab = tab; if (tab == Tab.HISTORY) s.loadHistory(); if (tab == Tab.BAG) s.refresh(); scope.launch { drawer.close() } }
+            val go = { tab: Tab -> s.flow = null; s.tab = tab; if (tab == Tab.HISTORY) s.loadHistory(); if (tab == Tab.BAG) s.refresh(); if (tab == Tab.ATTEMPTS) s.loadAttempts(); scope.launch { drawer.close() } }
             NavigationDrawerItem(label = { Text(t.home, style = MaterialTheme.typography.titleMedium) }, icon = { Icon(Icons.Filled.Home, null) }, selected = s.tab == Tab.HOME && s.flow == null, onClick = { go(Tab.HOME) }, modifier = Modifier.padding(horizontal = 8.dp), colors = NavigationDrawerItemDefaults.colors(selectedContainerColor = C.IndigoWash, selectedTextColor = C.Indigo, selectedIconColor = C.Indigo))
             NavigationDrawerItem(label = { Text(t.myBag, style = MaterialTheme.typography.titleMedium) }, icon = { Icon(Icons.Filled.Inventory2, null) }, selected = s.tab == Tab.BAG && s.flow == null, onClick = { go(Tab.BAG) }, modifier = Modifier.padding(horizontal = 8.dp), colors = NavigationDrawerItemDefaults.colors(selectedContainerColor = C.IndigoWash, selectedTextColor = C.Indigo, selectedIconColor = C.Indigo))
             NavigationDrawerItem(label = { Text(t.history, style = MaterialTheme.typography.titleMedium) }, icon = { Icon(Icons.Filled.History, null) }, selected = s.tab == Tab.HISTORY && s.flow == null, onClick = { go(Tab.HISTORY) }, modifier = Modifier.padding(horizontal = 8.dp), colors = NavigationDrawerItemDefaults.colors(selectedContainerColor = C.IndigoWash, selectedTextColor = C.Indigo, selectedIconColor = C.Indigo))
+            HorizontalDivider(color = C.Line, modifier = Modifier.padding(vertical = 8.dp))
+            NavigationDrawerItem(label = { Text(t.howToUse, style = MaterialTheme.typography.titleMedium) }, icon = { Icon(Icons.AutoMirrored.Filled.HelpOutline, null) }, selected = false, onClick = { scope.launch { drawer.close() }; s.showIntro = true }, modifier = Modifier.padding(horizontal = 8.dp))
+            NavigationDrawerItem(label = { Text(t.voiceAttempts, style = MaterialTheme.typography.titleMedium) }, icon = { Icon(Icons.Filled.GraphicEq, null) }, selected = s.tab == Tab.ATTEMPTS && s.flow == null, onClick = { go(Tab.ATTEMPTS) }, modifier = Modifier.padding(horizontal = 8.dp), colors = NavigationDrawerItemDefaults.colors(selectedContainerColor = C.IndigoWash, selectedTextColor = C.Indigo, selectedIconColor = C.Indigo))
             HorizontalDivider(color = C.Line, modifier = Modifier.padding(vertical = 8.dp))
             Column(Modifier.padding(horizontal = 16.dp)) { Text(t.language, style = MaterialTheme.typography.bodyMedium); Spacer(Modifier.height(6.dp)); LangRow(s) }
             Spacer(Modifier.weight(1f))
@@ -132,7 +142,7 @@ fun Shell(s: AppState, mic: Mic, drawerOpen: Boolean = false) {
                 }
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    val title = s.flow?.let { t.act(it.kind).first } ?: when (s.tab) { Tab.HOME -> s.hotel?.name ?: ""; Tab.BAG -> t.myBag; Tab.HISTORY -> t.history }
+                    val title = s.flow?.let { t.act(it.kind).first } ?: when (s.tab) { Tab.HOME -> s.hotel?.name ?: ""; Tab.BAG -> t.myBag; Tab.HISTORY -> t.history; Tab.ATTEMPTS -> t.voiceAttempts }
                     Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 1)
                     Text("${s.me?.displayName ?: ""} · ${s.hotel?.name ?: ""}", style = MaterialTheme.typography.bodyMedium, fontSize = 13.sp, maxLines = 1)
                 }
@@ -144,12 +154,14 @@ fun Shell(s: AppState, mic: Mic, drawerOpen: Boolean = false) {
                     f != null -> FlowScreen(s, f, mic)
                     s.tab == Tab.HOME -> HomeScreen(s)
                     s.tab == Tab.BAG -> BagScreen(s)
+                    s.tab == Tab.ATTEMPTS -> AttemptsScreen(s)
                     else -> HistoryScreen(s)
                 }
             }
             if (s.flow == null && s.tab == Tab.HOME) VoiceBar(s, mic)
         }
     }
+    if (s.showIntro) IntroScreen(s, mic)
 }
 
 /** Bottom bar on the home screen: hold the mic or type. */
@@ -160,6 +172,8 @@ fun VoiceBar(s: AppState, mic: Mic) {
     var startedAt by remember { mutableLongStateOf(0L) }
     var interim by remember { mutableStateOf("") }
     var level by remember { mutableFloatStateOf(0f) }
+    // Recordings stop by themselves at 15 s: long holds cost more and understand less.
+    LaunchedEffect(live) { if (live) { delay(15_000); if (live) mic.release() } }
     Composer(
         placeholder = t.typeHere, slideText = t.slideToCancel, releaseCancelText = t.releaseToCancel,
         live = live, startedAt = startedAt, interim = interim, level = level, busy = s.busy, waitingLong = s.waitingLong,
@@ -293,6 +307,58 @@ fun HistoryScreen(s: AppState) {
                 }
                 Text(runCatching { OffsetDateTime.parse(e.createdAt).atZoneSameInstant(ZoneId.systemDefault()).format(fmt) }.getOrDefault(""), fontSize = 13.sp, color = C.Ink3, textAlign = TextAlign.End)
             } }
+        }
+    }
+}
+
+
+/** The staff member's own last voice attempts: what was heard, in which language, how fast, and what happened. For quick testing. */
+@Composable
+fun AttemptsScreen(s: AppState) {
+    val t = s.t
+    fun langName(code: String?) = when (code) { "gu-IN" -> "ગુજરાતી"; "hi-IN" -> "हिंदी"; "en-IN" -> "English"; "mixed" -> t.langTag("mixed") ?: "Mixed"; else -> "–" }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        if (s.attempts.isEmpty()) Text(t.noAttempts, color = C.Ink2)
+        s.attempts.forEach { a ->
+            Panel {
+                Row(Modifier.fillMaxWidth()) {
+                    Text(a.createdAt.substringAfter('T').take(8), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = C.Ink2, modifier = Modifier.weight(1f))
+                    val outcome = when { a.status == "FAILED" -> "✗ ${a.errorCode ?: "FAILED"}"; a.fallback != null -> "~ phone words"; a.confirmed == true -> "✓ saved"; a.status == "AMBIGUOUS" -> "? needed help"; else -> "✓ ${a.action ?: ""}" }
+                    Text(outcome, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = if (a.status == "FAILED") C.Brick else C.Ink)
+                }
+                Text(if (a.transcript.isNullOrEmpty()) "—" else "“${a.transcript}”", fontSize = 16.sp)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(langName(a.language), Modifier.clip(RoundedCornerShape(10.dp)).background(C.IndigoWash).padding(horizontal = 7.dp, vertical = 2.dp), color = C.Indigo, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Text(if (a.inputKind == "text") "⌨️" else "🎤", fontSize = 12.sp)
+                    Text(String.format("%.1f s", (a.latencyMs ?: 0) / 1000.0), fontSize = 12.sp, color = C.Ink2)
+                }
+            }
+        }
+    }
+}
+
+/** Four short cards shown once after the first sign-in, ending with a practice command that changes nothing. */
+@Composable
+fun IntroScreen(s: AppState, mic: Mic) {
+    val t = s.t
+    var page by remember { mutableIntStateOf(0) }
+    val cards = listOf(Triple(Icons.Filled.Mic, t.introTitle1, t.introBody1), Triple(Icons.Filled.TouchApp, t.introTitle2, t.introBody2),
+        Triple(Icons.Filled.CheckCircle, t.introTitle3, t.introBody3), Triple(Icons.Filled.AutoAwesome, t.introTitle4, t.introBody4))
+    var demo by remember { mutableFloatStateOf(0.3f) }
+    LaunchedEffect(page) { while (page == 0) { demo = 0.3f + 0.7f * kotlin.math.abs(kotlin.math.sin(System.currentTimeMillis() / 300.0)).toFloat(); delay(120) } }
+    Box(Modifier.fillMaxSize().background(C.Linen).systemBarsPadding().padding(24.dp)) {
+        TextButton({ s.finishIntro(false) }, Modifier.align(Alignment.TopEnd)) { Text(t.introSkip, color = C.Ink2, fontWeight = FontWeight.SemiBold) }
+        Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+            Box(Modifier.size(120.dp).clip(CircleShape).background(C.Marigold), contentAlignment = Alignment.Center) { Icon(cards[page].first, null, tint = C.Ink, modifier = Modifier.size(56.dp)) }
+            Spacer(Modifier.height(20.dp))
+            if (page == 0) { LevelMeter(demo, Modifier.scale(2f)); Spacer(Modifier.height(20.dp)) }
+            Text(cards[page].second, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+            Spacer(Modifier.height(12.dp))
+            Text(cards[page].third, fontSize = 18.sp, color = C.Ink2, textAlign = TextAlign.Center)
+        }
+        Column(Modifier.align(Alignment.BottomCenter), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { repeat(4) { i -> Box(Modifier.size(8.dp).clip(CircleShape).background(if (i == page) C.Indigo else C.Line)) } }
+            if (page < 3) BigButton(t.introNext, { page += 1 }) else BigButton(t.introTry, { s.finishIntro(true, mic) }, color = C.Mint)
         }
     }
 }

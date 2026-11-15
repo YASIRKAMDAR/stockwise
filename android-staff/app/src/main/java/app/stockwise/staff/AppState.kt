@@ -11,7 +11,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.UUID
 
-enum class Tab { HOME, BAG, HISTORY }
+enum class Tab { HOME, BAG, HISTORY, ATTEMPTS }
 enum class Step { ROOM, ITEMS, CHECK, DONE }
 data class Flow(
     val kind: Kind, val step: Step, val roomId: String? = null, val roomNumber: String? = null,
@@ -54,7 +54,7 @@ class AppState(ctx: Context) {
     fun boot() = scope.launch {
         booting = true
         if (store.session != null) {
-            try { me = api.me(); lang = me!!.language.also { store.lang = it }; refresh() }
+            try { me = api.me(); lang = me!!.language.also { store.lang = it }; refresh(); if (!store.introSeen) showIntro = true }
             catch (e: ApiException) { if (e.status == 401) store.session = null }
             catch (e: OfflineException) { notice = Notice(t.savedOnPhone.substringBefore('.') + "…") }
         }
@@ -65,7 +65,7 @@ class AppState(ctx: Context) {
         busy = true; loginError = null
         try {
             api.staffLogin(code, pin); store.lastCode = code.trim().uppercase()
-            me = api.me(); lang = me!!.language.also { store.lang = it }; tab = Tab.HOME; flow = null
+            me = api.me(); lang = me!!.language.also { store.lang = it }; tab = Tab.HOME; flow = null; if (!store.introSeen) showIntro = true
             refresh(); OutboxWorker.kick(app)
         } catch (e: ApiException) { loginError = e.message }
         catch (e: OfflineException) { loginError = "No connection. Check the phone's internet and try again." }
@@ -123,6 +123,15 @@ class AppState(ctx: Context) {
     /** Google didn't answer and the server had nothing to fall back on: what the phone heard, for the retry card. */
     var retryHeard by mutableStateOf<String?>(null)
     private var toldNoGuVoice = false
+    var showIntro by mutableStateOf(false)
+    var practicing by mutableStateOf(false)
+    var attempts by mutableStateOf<List<VoiceAttempt>>(emptyList())
+    fun loadAttempts() = scope.launch { attempts = runCatching { api.voiceAttempts().attempts }.getOrDefault(emptyList()) }
+    /** The walkthrough: shown once after the first sign-in; "How to use" in the menu opens it again. */
+    fun finishIntro(practice: Boolean, mic: app.stockwise.staff.ui.Mic? = null) {
+        store.introSeen = true; showIntro = false
+        if (practice) { practicing = true; tab = Tab.HOME; flow = null; notice = Notice(t.introPractice, warn = false); mic?.let { speak(it, t.introPractice, lang) } }
+    }
     /** Read aloud in the language spoken; if this phone has no voice for it, the Mic falls back and we say so once. */
     fun speak(mic: app.stockwise.staff.ui.Mic, text: String, lang: String) {
         if (lang == "gu" && !mic.hasVoice("gu") && !toldNoGuVoice) { toldNoGuVoice = true; notice = Notice(t.noGuVoice, warn = false) }
@@ -132,7 +141,7 @@ class AppState(ctx: Context) {
     private fun applyCommand(c: LocalCommand) {
         misses = 0
         when (c) {
-            is LocalCommand.Go -> { flow = null; tab = c.tab; if (c.tab == Tab.HISTORY) loadHistory(); if (c.tab == Tab.BAG) refresh() }
+            is LocalCommand.Go -> { flow = null; tab = c.tab; if (c.tab == Tab.HISTORY) loadHistory(); if (c.tab == Tab.BAG) { refresh(); if (practicing) { practicing = false; notice = Notice(t.introDone, warn = false) } } }
             is LocalCommand.Language -> setLanguage(c.lang)
             LocalCommand.SignOut -> signOut()
         }

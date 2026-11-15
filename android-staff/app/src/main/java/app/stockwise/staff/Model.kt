@@ -32,6 +32,10 @@ import kotlinx.serialization.json.JsonElement
 @Serializable data class EventLine(val productId: String? = null, val name: String = "", val quantity: Int = 0, val roomNumber: String? = null)
 @Serializable data class Event(val eventId: String, val action: String, val createdAt: String, val viaVoice: Boolean = false, val reversedBy: String? = null, val lines: List<EventLine>? = null)
 @Serializable data class ActivityPage(val items: List<Event> = emptyList())
+/** One of the staff member's own recent voice attempts, as the server logged it (never audio). */
+@Serializable data class VoiceAttempt(val createdAt: String, val status: String, val errorCode: String? = null, val language: String? = null, val client: String? = null,
+    val inputKind: String? = null, val fallback: String? = null, val latencyMs: Int? = null, val transcript: String? = null, val action: String? = null, val confirmed: Boolean? = null)
+@Serializable data class VoiceAttemptsPage(val attempts: List<VoiceAttempt> = emptyList())
 @Serializable data class TxResult(val eventId: String = "", val refCode: String? = null)
 @Serializable data class ApiErrorBody(val error: ApiErrorInner? = null)
 @Serializable data class ApiErrorInner(val code: String = "", val message: String = "", val details: JsonElement? = null)
