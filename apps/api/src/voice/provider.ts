@@ -30,8 +30,13 @@ export class GeminiProvider implements VoiceProvider {
           headers: { 'content-type': 'application/json', 'x-goog-api-key': this.cfg.GEMINI_API_KEY! },
           body: JSON.stringify(body),
         });
-        if (res.status >= 500 || res.status === 429) { lastErr = new Error(`provider ${res.status}`); continue; }
-        if (!res.ok) throw err('TEMPORARY_UNAVAILABLE', `Voice provider rejected request (${res.status})`);
+        if (!res.ok) {
+          // Log Google's reason (never the key or the audio) so failures can be diagnosed from Vercel logs.
+          const detail = (await res.text().catch(() => '')).slice(0, 400);
+          console.warn(JSON.stringify({ msg: 'gemini request failed', status: res.status, attempt, mimeType, bytes: audio.length, detail }));
+          if (res.status >= 500 || res.status === 429) { lastErr = new Error(`provider ${res.status}`); continue; }
+          throw err('TEMPORARY_UNAVAILABLE', `Voice provider rejected request (${res.status})`);
+        }
         const json: any = await res.json();
         const text = json?.candidates?.[0]?.content?.parts?.map((p: any) => p.text ?? '').join('') ?? '';
         let raw: unknown;
@@ -39,6 +44,7 @@ export class GeminiProvider implements VoiceProvider {
         return { raw, inputTokens: json?.usageMetadata?.promptTokenCount ?? null, outputTokens: json?.usageMetadata?.candidatesTokenCount ?? null, model: this.cfg.GEMINI_MODEL, simulated: false };
       } catch (e: any) {
         if (e?.code && e?.status) throw e;
+        console.warn(JSON.stringify({ msg: 'gemini request error', attempt, mimeType, bytes: audio.length, error: String(e?.name === 'AbortError' ? `timeout after ${this.cfg.GEMINI_TIMEOUT_MS}ms` : e) }));
         lastErr = e;
       } finally {
         clearTimeout(t);
