@@ -94,7 +94,6 @@ class ScreensTest {
             lines = listOf(Line("p1", 2, "r203", "203", "MY_STOCK"), Line("p2", 1, "r203", "203", "MY_STOCK")))
         shot("13-check-language-tag", s)
     }
-    @Test fun s14_google_slow() { val s = state(); s.retryHeard = ""; shot("14-google-slow", s) }
     @Test fun s16_intro() { val s = state(); s.showIntro = true; shot("16-intro", s) }
     @Test fun s17_attempts() {
         val s = state(); s.tab = Tab.ATTEMPTS
@@ -102,5 +101,19 @@ class ScreensTest {
             VoiceAttempt("2026-11-15T10:03:30Z", "FAILED", errorCode = "TEMPORARY_UNAVAILABLE", client = "android", inputKind = "audio", latencyMs = 5029))
         shot("17-voice-attempts", s)
     }
-    @Test fun s15_still_asking() { val s = state(); s.busy = true; s.waitingLong = true; shot("15-still-asking", s) }
+    private fun flow203() = Flow(Kind.PLACE_IN_ROOM, Step.CHECK, "r203", "203", proposalId = "x", transcript = "Room 203 ma do soap aur ek shampoo mukyu",
+        lines = listOf(Line("p1", 2, "r203", "203", "MY_STOCK"), Line("p2", 1, "r203", "203", "MY_STOCK")))
+    @Test fun s18_chat_job() {
+        val s = state()
+        s.chat = listOf(ChatMessage(Role.ME, ChatBody.Said("Room 203 ma do soap aur ek shampoo mukyu", true, "mixed")), ChatMessage(Role.APP, ChatBody.Job(flow203())))
+        shot("18-chat-job", s)
+    }
+    @Test fun s19_chat_saved_and_bag() {
+        val s = state()
+        s.chat = listOf(ChatMessage(Role.ME, ChatBody.Said("Room 203 ma do soap aur ek shampoo mukyu", true, "mixed")), ChatMessage(Role.APP, ChatBody.Job(flow203(), ChatState.SAVED, "A1B2C3")),
+            ChatMessage(Role.ME, ChatBody.Said("my bag", false)), ChatMessage(Role.APP, ChatBody.Bag(listOf(s.products[0] to 6, s.products[1] to 3))))
+        shot("19-chat-saved-bag", s)
+    }
+    @Test fun s20_chat_retry() { val s = state(); s.chat = listOf(ChatMessage(Role.ME, ChatBody.Said("…", true)), ChatMessage(Role.APP, ChatBody.Retry(""))); shot("20-chat-google-slow", s) }
+    @Test fun s15_still_asking() { val s = state(); s.chat = listOf(ChatMessage(Role.ME, ChatBody.Said("How much shampoo", false))); s.busy = true; s.waitingLong = true; shot("15-still-asking", s) }
 }

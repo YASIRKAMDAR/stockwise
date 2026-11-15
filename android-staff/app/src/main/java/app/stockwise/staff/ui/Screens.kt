@@ -20,6 +20,11 @@ import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.ui.draw.scale
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material3.*
@@ -152,7 +157,7 @@ fun Shell(s: AppState, mic: Mic, drawerOpen: Boolean = false) {
                 val f = s.flow
                 when {
                     f != null -> FlowScreen(s, f, mic)
-                    s.tab == Tab.HOME -> HomeScreen(s)
+                    s.tab == Tab.HOME -> HomeScreen(s, mic)
                     s.tab == Tab.BAG -> BagScreen(s)
                     s.tab == Tab.ATTEMPTS -> AttemptsScreen(s)
                     else -> HistoryScreen(s)
@@ -206,7 +211,8 @@ fun VoiceBar(s: AppState, mic: Mic) {
 }
 
 @Composable
-fun HomeScreen(s: AppState) {
+fun HomeScreen(s: AppState, mic: Mic) {
+    if (s.chat.isNotEmpty()) { ChatFeed(s, mic); return }
     val t = s.t
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Panel {
@@ -219,40 +225,8 @@ fun HomeScreen(s: AppState) {
             Text(t.youCanSay, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = C.Ink2)
             t.examples.drop(1).forEach { Text(it, fontSize = 14.sp, color = C.Ink2) }
         }
-        s.outbox.filter { it.error == null }.takeIf { it.isNotEmpty() }?.let { q ->
-            Panel(border = C.Marigold, bg = C.MarigoldWash) {
-                Text("${t.pending}: ${q.size}", fontWeight = FontWeight.Bold, color = C.Amber)
-                q.take(3).forEach { Text(it.label, color = C.Amber) }
-                Spacer(Modifier.height(6.dp)); BigButton(t.sendNow, { s.sendOutbox() }, color = C.Ink)
-            }
-        }
-        s.outbox.filter { it.error != null }.forEach { p ->
-            Panel(border = C.Brick) {
-                Text(p.label, fontWeight = FontWeight.Bold); Text(p.error ?: "", color = C.Brick)
-                TextButton({ s.discardPending(p.key) }) { Text("OK") }
-            }
-        }
+        OutboxPanels(s)
         s.notice?.let { Banner(it.text, it.warn) }
-        s.retryHeard?.let { heard ->
-            // Google didn't answer: two ways forward instead of a dead end.
-            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(C.MarigoldWash).padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(t.googleSlow, color = C.Amber, fontWeight = FontWeight.SemiBold)
-                if (heard.isNotBlank()) Text(heard, color = C.Ink2, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Button({ s.retryHeard = null; s.notice = Notice(t.holdHint, warn = false) }, Modifier.weight(1f).height(44.dp), shape = RoundedCornerShape(22.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = C.Brick, contentColor = Color.White)) { Text(t.sayAgain) }
-                    OutlinedButton({ s.retryHeard = null; s.draft = heard }, Modifier.weight(1f).height(44.dp), shape = RoundedCornerShape(22.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = C.Ink)) { Text(t.typeIt) }
-                }
-            }
-        }
-        s.answer?.let { rows ->
-            Panel {
-                rows.forEach { r -> Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                    Text(r.name, Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
-                    Text("${t.store} ${r.store}", Modifier.padding(end = 12.dp)); Text("👜 ${s.bag[r.productId] ?: 0}") } }
-            }
-        }
         BigButton(t.tapInstead, { s.tapInstead() }, outline = !s.nudgeTap, color = C.Ink)
         Text(t.orTap, style = MaterialTheme.typography.bodyMedium)
         JobTile(s, Kind.PLACE_IN_ROOM, primary = true)
@@ -261,6 +235,157 @@ fun HomeScreen(s: AppState) {
         }
         JobTile(s, Kind.SUPPLIER_RECEIPT)
         Spacer(Modifier.height(8.dp))
+    }
+}
+
+@Composable
+fun OutboxPanels(s: AppState) {
+    val t = s.t
+    s.outbox.filter { it.error == null }.takeIf { it.isNotEmpty() }?.let { q ->
+        Panel(border = C.Marigold, bg = C.MarigoldWash) {
+            Text("${t.pending}: ${q.size}", fontWeight = FontWeight.Bold, color = C.Amber)
+            q.take(3).forEach { Text(it.label, color = C.Amber) }
+            Spacer(Modifier.height(6.dp)); BigButton(t.sendNow, { s.sendOutbox() }, color = C.Ink)
+        }
+    }
+    s.outbox.filter { it.error != null }.forEach { p ->
+        Panel(border = C.Brick) {
+            Text(p.label, fontWeight = FontWeight.Bold); Text(p.error ?: "", color = C.Brick)
+            TextButton({ s.discardPending(p.key) }) { Text("OK") }
+        }
+    }
+}
+
+/** The conversation: what was said on the right, what the app understood on the left, newest at the bottom. */
+@Composable
+fun ChatFeed(s: AppState, mic: Mic) {
+    val t = s.t
+    val list = rememberLazyListState()
+    LaunchedEffect(s.chat.size, s.busy) { if (s.chat.isNotEmpty()) list.animateScrollToItem(s.chat.size + 1) }
+    Column(Modifier.fillMaxSize()) {
+        LazyColumn(Modifier.weight(1f).padding(horizontal = 12.dp), state = list, verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(vertical = 10.dp)) {
+            item { OutboxPanels(s) }
+            items(s.chat, key = { it.id }) { m -> ChatRow(s, m, mic) }
+            if (s.busy) item { AppBubble { Row(verticalAlignment = Alignment.CenterVertically) { CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = C.Indigo); Spacer(Modifier.width(10.dp)); Text(if (s.waitingLong) t.stillAsking else t.understanding, color = C.Ink2) } } }
+            item { s.notice?.let { Banner(it.text, it.warn) } }
+            item { Spacer(Modifier.height(4.dp)) }
+        }
+        // Quick ways on from the thread, always one tap away.
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Chip("🏠 ${t.home}") { s.clearChat() }
+            Chip("🚪 ${t.act(Kind.PLACE_IN_ROOM).first}") { s.start(Kind.PLACE_IN_ROOM) }
+            Chip("🛍️ ${t.act(Kind.CHECKOUT_TO_STAFF).first}") { s.start(Kind.CHECKOUT_TO_STAFF) }
+            Chip("↩️ ${t.act(Kind.RETURN_TO_STORE).first}") { s.start(Kind.RETURN_TO_STORE) }
+            Chip("👜 ${t.myBag}") { s.interpret(t.myBag, 0) }
+        }
+    }
+}
+
+@Composable
+fun Chip(text: String, onClick: () -> Unit) {
+    Text(text, Modifier.clip(RoundedCornerShape(20.dp)).background(C.Paper).border(1.dp, C.Line, RoundedCornerShape(20.dp)).clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 9.dp), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = C.Ink, maxLines = 1)
+}
+
+@Composable
+fun ChatRow(s: AppState, m: ChatMessage, mic: Mic) {
+    val t = s.t
+    when (val b = m.body) {
+        is ChatBody.Said -> MeBubble(s, b.text, b.spoken, b.lang)
+        is ChatBody.Text -> AppBubble(warn = b.warn) { Text(b.text, color = if (b.warn) C.Amber else C.Ink, fontSize = 16.sp) }
+        is ChatBody.Retry -> AppBubble(warn = true) {
+            Text(t.googleSlow, color = C.Amber, fontWeight = FontWeight.SemiBold)
+            if (b.heard.isNotBlank()) Text(b.heard, color = C.Ink2, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button({ s.notice = Notice(t.holdHint, warn = false) }, Modifier.weight(1f).height(44.dp), shape = RoundedCornerShape(22.dp), colors = ButtonDefaults.buttonColors(containerColor = C.Brick, contentColor = Color.White)) { Text(t.sayAgain) }
+                OutlinedButton({ s.editSaid(b.heard) }, Modifier.weight(1f).height(44.dp), shape = RoundedCornerShape(22.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = C.Ink)) { Text(t.typeIt) }
+            }
+        }
+        is ChatBody.Stock -> AppBubble {
+            b.rows.forEach { r -> Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(s.product(r.productId)?.emoji() ?: "📦", fontSize = 20.sp); Spacer(Modifier.width(8.dp))
+                Text(s.product(r.productId)?.native(s.lang) ?: r.name, Modifier.weight(1f), fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                Text("${t.store} ${r.store}", Modifier.padding(end = 12.dp), fontWeight = FontWeight.ExtraBold, fontSize = 18.sp); Text("👜 ${s.bag[r.productId] ?: 0}", fontSize = 15.sp, color = C.Ink2) } }
+        }
+        is ChatBody.Bag -> AppBubble {
+            Text(t.yourBag, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = C.Ink2)
+            if (b.items.isEmpty()) Text(t.nothingInBag, fontSize = 16.sp)
+            b.items.forEach { (p, q) -> Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text(p.emoji(), fontSize = 20.sp); Spacer(Modifier.width(8.dp)); Text(p.native(s.lang) ?: p.name, Modifier.weight(1f), fontSize = 16.sp); Text("$q", fontWeight = FontWeight.ExtraBold, fontSize = 18.sp) } }
+        }
+        is ChatBody.Job -> AppBubble(warn = false) { JobCard(s, m.id, b, mic) }
+    }
+}
+
+@Composable
+fun MeBubble(s: AppState, text: String, spoken: Boolean, lang: String?) {
+    val t = s.t
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        Column(Modifier.widthIn(max = 300.dp).clip(RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp)).background(C.Indigo).clickable { s.editSaid(text) }.padding(horizontal = 14.dp, vertical = 10.dp), horizontalAlignment = Alignment.End) {
+            Row(verticalAlignment = Alignment.Top) {
+                Icon(if (spoken) Icons.Filled.Mic else Icons.Filled.Keyboard, null, tint = Color.White.copy(alpha = 0.75f), modifier = Modifier.size(14.dp).padding(top = 2.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(text, color = Color.White, fontSize = 17.sp)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                t.langTag(lang)?.let { Text(it, Modifier.clip(RoundedCornerShape(9.dp)).background(Color.White).padding(horizontal = 7.dp, vertical = 1.dp), color = C.Indigo, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+                Text("✎ ${t.tapToFix}", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
+            }
+        }
+    }
+}
+
+@Composable
+fun AppBubble(warn: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(end = 16.dp), verticalAlignment = Alignment.Top) {
+        Box(Modifier.size(30.dp).clip(CircleShape).background(C.Indigo), contentAlignment = Alignment.Center) { Text("✓", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f).clip(RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp)).background(if (warn) C.MarigoldWash else C.Paper).border(1.dp, if (warn) C.Marigold else C.Line, RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp)).padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp), content = content)
+    }
+}
+
+/** The job the app understood: big room, the lines, and Confirm / Edit / Cancel. Hold the small mic and say "haan" to confirm. */
+@Composable
+fun JobCard(s: AppState, id: Long, job: ChatBody.Job, mic: Mic) {
+    val t = s.t
+    val f = job.flow
+    var hearing by remember { mutableStateOf(false) }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        if (f.kind == Kind.PLACE_IN_ROOM && f.roomNumber != null) { Text("🚪", fontSize = 24.sp); Spacer(Modifier.width(6.dp)); Text(f.roomNumber, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold); Spacer(Modifier.width(10.dp)) }
+        Text(t.act(f.kind).first, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = C.Ink2)
+    }
+    f.lines.forEach { l ->
+        val p = s.product(l.productId)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(p?.emoji() ?: "❓", fontSize = 22.sp); Spacer(Modifier.width(8.dp))
+            Text(p?.native(s.lang) ?: p?.name ?: l.spoken, Modifier.weight(1f), fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+            Text("${l.quantity}", fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
+        }
+    }
+    when (job.state) {
+        ChatState.READY -> {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (mic.available || s.cloudVoice) Box(Modifier.size(width = 52.dp, height = 48.dp).clip(RoundedCornerShape(14.dp)).background(if (hearing) C.Brick else C.Marigold)
+                    .holdToTalk(onStart = {
+                        if (!mic.hasPermission()) { mic.requestPermission(); return@holdToTalk }
+                        hearing = true
+                        mic.start(if (mic.available) s.lang else "en", false, {}, {}) { text, _ -> hearing = false
+                            when (text?.let { yesNo(it) }) { true -> s.confirmChat(id); false -> s.cancelChat(id); null -> {} } }
+                    }, onSend = { mic.release() }, onCancel = { mic.cancel(); hearing = false }, onTap = { s.notice = Notice(t.holdYesNo, warn = false) }),
+                    contentAlignment = Alignment.Center) { Icon(Icons.Filled.Mic, t.holdYesNo, tint = if (hearing) Color.White else C.Ink) }
+                Button({ s.confirmChat(id) }, Modifier.weight(1f).height(48.dp), enabled = !s.busy, shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = C.Mint, disabledContainerColor = C.Line)) {
+                    Icon(Icons.Filled.Check, null); Spacer(Modifier.width(6.dp)); Text(t.confirm, fontWeight = FontWeight.Bold)
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton({ s.editChat(id) }, Modifier.weight(1f).height(40.dp), shape = RoundedCornerShape(20.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = C.Ink)) { Text(t.edit) }
+                OutlinedButton({ s.cancelChat(id) }, Modifier.weight(1f).height(40.dp), shape = RoundedCornerShape(20.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = C.Brick)) { Text(t.cancel) }
+            }
+            Text(t.holdYesNo, fontSize = 12.sp, color = C.Ink3)
+        }
+        ChatState.SAVING -> Row(verticalAlignment = Alignment.CenterVertically) { CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = C.Mint); Spacer(Modifier.width(8.dp)); Text("…", color = C.Ink2) }
+        ChatState.SAVED -> Text("${t.savedShort}${job.ref?.let { " · $it" } ?: ""}", color = C.Mint, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        ChatState.OFFLINE -> Text(t.savedOnPhone, color = C.Amber, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+        ChatState.CANCELLED -> Text(t.cancelled, color = C.Ink3, fontWeight = FontWeight.SemiBold)
     }
 }
 

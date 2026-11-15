@@ -57,3 +57,17 @@ fun Product.native(lang: String): String? {
     val re = if (lang == "gu") Regex("[\\u0A80-\\u0AFF]") else Regex("[\\u0900-\\u097F]")
     return aliases.firstOrNull { re.containsMatchIn(it.alias) }?.alias
 }
+
+// The conversation on the home screen.
+enum class Role { ME, APP }
+enum class ChatState { READY, SAVING, SAVED, OFFLINE, CANCELLED }
+sealed class ChatBody {
+    data class Said(val text: String, val spoken: Boolean, val lang: String? = null) : ChatBody()
+    data class Text(val text: String, val warn: Boolean) : ChatBody()
+    /** A job the server understood; nothing is saved until Confirm. */
+    data class Job(val flow: Flow, val state: ChatState = ChatState.READY, val ref: String? = null) : ChatBody()
+    data class Stock(val rows: List<QueryRow>) : ChatBody()
+    data class Bag(val items: List<Pair<Product, Int>>) : ChatBody()
+    data class Retry(val heard: String) : ChatBody()
+}
+data class ChatMessage(val role: Role, val body: ChatBody, val id: Long = System.nanoTime())
