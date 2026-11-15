@@ -55,6 +55,9 @@ class EndToEndTest {
 
     private fun json(body: String, code: Int = 200) = MockResponse().setResponseCode(code).setHeader("content-type", "application/json").setBody(body.trimIndent())
 
+    private var requestsJson = "[]"
+    private val openRequest = """[{"id":"r1","status":"OPEN","note":"low","createdAt":"2026-11-16T03:00:00Z","hotel":{"id":"h1","name":"Demo Hotel 1"},"warehouse":{"id":"wh","name":"Central Warehouse"},"requestedBy":"Priya Shah",
+        "lines":[{"productId":"p1","name":"Soap","unit":"pcs","quantity":48,"warehouseStock":900}],"ageHours":2.0}]"""
     @Before fun startServer() {
         server = MockWebServer()
         server.dispatcher = object : Dispatcher() {
@@ -65,7 +68,13 @@ class EndToEndTest {
                 return when {
                     p.endsWith("/auth/login") && request.method == "POST" -> json("""{"ok":true}""").addHeader("Set-Cookie", "sw_session=mgr; Path=/; HttpOnly")
                     p.endsWith("/me") && request.method == "GET" -> json("""{"id":"m1","displayName":"Priya Shah","employeeCode":"M1","role":"MANAGER","language":"en",
-                        "hotels":[{"id":"h1","name":"Demo Hotel 1","code":"H1","roles":["MANAGER"]},{"id":"h2","name":"Demo Hotel 2","code":"H2","roles":["MANAGER"]}],"config":{"voiceProvider":"fake"}}""")
+                        "hotels":[{"id":"wh","name":"Central Warehouse","code":"WH","kind":"WAREHOUSE","roles":["MANAGER"]},{"id":"h1","name":"Demo Hotel 1","code":"H1","roles":["MANAGER"]},{"id":"h2","name":"Demo Hotel 2","code":"H2","roles":["MANAGER"]}],"warehouseId":"wh","config":{"voiceProvider":"fake"}}""")
+                    p.contains("/hotels/wh/stock") -> json("""{"items":[{"productId":"p1","name":"Soap","store":900,"reorderThreshold":200},{"productId":"p2","name":"Shampoo","store":470,"reorderThreshold":100}]}""")
+                    p.startsWith("/requests/top-up") -> json("""{"warehouse":{"id":"wh","name":"Central Warehouse"},"lines":[{"productId":"p1","name":"Soap","par":48,"store":0,"onTheWay":0,"requested":0,"warehouse":900,"quantity":48},{"productId":"p2","name":"Shampoo","par":60,"store":86,"onTheWay":0,"requested":0,"warehouse":470,"quantity":0}]}""")
+                    p.endsWith("/requests") && request.method == "POST" -> { requestsJson = openRequest; json("""{"requestId":"r1","status":"OPEN"}""", 201) }
+                    p.startsWith("/requests?") -> json(requestsJson)
+                    p.endsWith("/requests/r1/dispatch") && request.method == "POST" -> { requestsJson = "[]"; json("""{"transferId":"t9","refCode":"T9","status":"IN_TRANSIT"}""", 201) }
+                    p.startsWith("/request-schedules") -> json("[]")
                     p.endsWith("/products") -> json("""[{"id":"p1","sku":"SOAP","name":"Soap","unit":"pcs","icon":"🧼"},{"id":"p2","sku":"SHAMPOO","name":"Shampoo","unit":"pcs","icon":"🧴"}]""")
                     p.contains("/hotels/h1/stock") -> json("""{"items":[{"productId":"p1","name":"Soap","store":0,"staffHeld":14,"reorderThreshold":24,"low":true,"out":true},{"productId":"p2","name":"Shampoo","store":86,"reorderThreshold":30}]}""")
                     p.startsWith("/dashboard/alerts") -> json("""{"items":[{"id":"a1","severity":"HIGH","category":"LOW_STOCK","hotelId":"h1","title":"Soap out of stock at Demo Hotel 1","detail":"Store 0 pcs, reorder at 24"}]}""")
@@ -81,6 +90,9 @@ class EndToEndTest {
                         if (body.contains("name=\"mode\"") && body.contains("count"))
                             json("""{"proposalId":"pc","status":"COUNT_ENTRY","action":"COUNT_ENTRY","transcript":"soap 48, shampoo 30","detectedLanguage":"en-IN",
                                 "lines":[{"productId":"p1","productName":"Soap","spokenProduct":"soap","quantity":48,"issues":[]},{"productId":"p2","productName":"Shampoo","spokenProduct":"shampoo","quantity":30,"issues":[]}],"warnings":[]}""")
+                        else if (body.contains("warehouse se"))
+                            json("""{"proposalId":"pr","status":"READY_TO_CONFIRM","action":"REQUEST_FROM_WAREHOUSE","transcript":"warehouse se 48 sabun mangwao","detectedLanguage":"hi-IN",
+                                "lines":[{"productId":"p1","productName":"Soap","spokenProduct":"sabun","quantity":48,"issues":[]}],"warnings":[]}""")
                         else
                             json("""{"proposalId":"pq","status":"QUERY_RESULT","action":"STOCK_QUERY","transcript":"Soap kitna bacha hai?","detectedLanguage":"hi-IN","lines":[],"warnings":[],
                                 "queryResult":[{"productId":"p1","name":"Soap","unit":"pcs","store":0,"staffHeld":14,"inTransit":0,"hotelName":"Demo Hotel 1","low":true}]}""")
@@ -114,7 +126,7 @@ class EndToEndTest {
         rule.waitForIdle()
     }
 
-    private fun state() = AppState(ApplicationProvider.getApplicationContext(), server.url("/").toString().trimEnd('/')).also { it.booting = false; it.lang = "en"; it.store.introSeen = true }
+    private fun state() = AppState(ApplicationProvider.getApplicationContext(), server.url("/").toString().trimEnd('/')).also { it.booting = false; it.lang = "en"; it.store.introSeen = true; it.store.hotelId = "h1"; it.hotelId = "h1" }
 
     private fun signIn(s: AppState) {
         rule.setContent { ManagerApp(s, mic) }
@@ -178,5 +190,47 @@ class EndToEndTest {
         assertTrue(receipt.getHeader("idempotency-key") != null)
         val rb = receipt.body.readUtf8()
         assertTrue(rb, rb.contains("\"productId\":\"p2\"") && rb.contains("\"receivedQuantity\":40") && rb.contains("\"final\":true"))
+    }
+
+    @Test fun hotel_asks_warehouse_sends() {
+        val s = state()
+        signIn(s)
+        // Hotel side: the low-stock alert, and "Ask warehouse" opens the request sheet pre-filled to par.
+        rule.onNodeWithText("From the warehouse").assertExists()
+        rule.onNodeWithText("Ask warehouse").performClick(); pump()
+        waitFor(s, "top-up loaded", 10_000) { s.topUp != null }
+        rule.waitForIdle()
+        rule.onNodeWithText("Send request").performClick(); pump()
+        waitFor(s, "request posted", 10_000) { received.any { it.path == "/requests" && it.method == "POST" } }
+        val ask = received.last { it.path == "/requests" && it.method == "POST" }.body.readUtf8()
+        assertTrue(ask, ask.contains("\"hotelId\":\"h1\"") && ask.contains("\"productId\":\"p1\"") && ask.contains("\"quantity\":48") && !ask.contains("\"productId\":\"p2\""))
+        waitFor(s, "request listed", 10_000) { s.openRequests.isNotEmpty() }
+        rule.waitForIdle()
+        rule.onNodeWithText("Waiting for the warehouse · Asked 2 h ago").assertExists()
+
+        // Spoken request: a card waits for Send; nothing is posted until then.
+        requestsJson = "[]"; received.clear()
+        rule.onNodeWithContentDescription("Ask: “how much soap is left?”").performTextInput("warehouse se 48 sabun mangwao")
+        rule.onNodeWithContentDescription("Send").performClick(); pump()
+        waitFor(s, "ask card", 10_000) { s.chat.any { it.body is ChatBody.Ask } && !s.busy }
+        rule.waitForIdle()
+        assertTrue(received.none { it.path == "/requests" && it.method == "POST" })
+        rule.onNodeWithText("Send request").performClick(); pump()
+        waitFor(s, "spoken request posted", 10_000) { received.any { it.path == "/requests" && it.method == "POST" } }
+        waitFor(s, "card marked sent", 10_000) { s.chat.any { (it.body as? ChatBody.Ask)?.sent == true } }
+
+        // Warehouse side: switch site, see the request, send it all.
+        s.clearChat(); received.clear()
+        s.setHotel("wh")
+        waitFor(s, "warehouse loaded", 10_000) { s.isWarehouse && s.openRequests.isNotEmpty() && !s.busy }
+        rule.waitForIdle()
+        rule.onNodeWithText("Hotels are asking").assertExists()
+        rule.onNodeWithText("Demo Hotel 1").assertExists()
+        rule.onNodeWithText("Send all").performClick(); pump()
+        waitFor(s, "dispatched", 10_000) { received.any { it.path == "/requests/r1/dispatch" } }
+        val d = received.last { it.path == "/requests/r1/dispatch" }
+        assertEquals("POST", d.method)
+        assertTrue(d.getHeader("idempotency-key") != null)
+        waitFor(s, "request gone", 10_000) { s.openRequests.isEmpty() }
     }
 }

@@ -39,7 +39,7 @@ class ScreensTest {
         val s = AppState(ApplicationProvider.getApplicationContext())
         s.booting = false
         s.lang = "en"
-        s.me = Me("u1", "Priya Shah", "M1", "MANAGER", "en", listOf(Hotel("h1", "Demo Hotel 1", "H1"), Hotel("h2", "Demo Hotel 2", "H2"), Hotel("h3", "Demo Hotel 3", "H3")), MeConfig("fake", 25))
+        s.me = Me("u1", "Priya Shah", "M1", "MANAGER", "en", listOf(Hotel("wh", "Central Warehouse", "WH", kind = "WAREHOUSE"), Hotel("h1", "Demo Hotel 1", "H1"), Hotel("h2", "Demo Hotel 2", "H2"), Hotel("h3", "Demo Hotel 3", "H3")), MeConfig("fake", 25), warehouseId = "wh")
         s.hotelId = "h1"
         fun p(id: String, sku: String, name: String, gu: String, icon: String) = Product(id, sku, name, "pcs", icon, aliases = listOf(Alias("gu", gu)))
         s.products = listOf(p("p1", "SOAP", "Soap", "સાબુ", "🧼"), p("p2", "SHAMPOO", "Shampoo", "શેમ્પૂ", "🧴"), p("p3", "COMB", "Comb", "કાંસકો", "🪮"),
@@ -52,6 +52,11 @@ class ScreensTest {
             Alert("a3", "MEDIUM", "COUNT_OVERDUE", "h1", "Weekly count overdue at Demo Hotel 1", "Last count 9 days ago"))
         s.corrections = listOf(CorrectionRequest("c1", "e1", "Room 204 was 2 soap, not 12", "2026-11-15T11:50:00Z", "Staff 103"))
         s.countStatus = CountStatus("h1", "OVERDUE", "2026-11-06T09:00:00Z")
+        s.requests = listOf(
+            StockRequest("r1", "OPEN", "Running low before the weekend", "2026-11-16T03:00:00Z", null, null, NamedRef("h1", "Demo Hotel 1"), NamedRef("wh", "Central Warehouse"), "Priya Shah", listOf(RequestLine("p1", "Soap", "pcs", 100, 900), RequestLine("p3", "Comb", "pcs", 40, 20)), 2.0),
+            StockRequest("r2", "SENT", null, "2026-11-15T07:00:00Z", "t5", "T5", NamedRef("h1", "Demo Hotel 1"), NamedRef("wh", "Central Warehouse"), "Scheduled", listOf(RequestLine("p2", "Shampoo", "pcs", 80, 470)), 22.0),
+            StockRequest("r3", "OPEN", null, "2026-11-16T01:00:00Z", null, null, NamedRef("h2", "Demo Hotel 2"), NamedRef("wh", "Central Warehouse"), "Demo Manager 2", listOf(RequestLine("p2", "Shampoo", "pcs", 60, 470)), 4.0))
+        s.schedules = listOf(RequestSchedule("s1", NamedRef("h1", "Demo Hotel 1"), 1, 7))
         s.transfers = listOf(
             Transfer("t1", "T-118", "DISCREPANCY", "2026-11-13T14:20:00Z", null, NamedRef("h2", "Demo Hotel 2"), NamedRef("h1", "Demo Hotel 1"), lines = listOf(TransferLine("p2", "Shampoo", sent = 40, received = 28)), outstandingUnits = 12, ageHours = 26.0, aged = true),
             Transfer("t2", "T-121", "OPEN", "2026-11-14T09:05:00Z", null, NamedRef("h1", "Demo Hotel 1"), NamedRef("h3", "Demo Hotel 3"), lines = listOf(TransferLine("p1", "Soap", sent = 50)), outstandingUnits = 50, ageHours = 31.0, aged = true))
@@ -89,4 +94,14 @@ class ScreensTest {
     @Test fun m09_stock() { val s = state(); s.tab = Tab.STOCK; shot("m09-stock", s) }
     @Test fun m10_gujarati() { val s = state(); s.lang = "gu"; shot("m10-today-gujarati", s) }
     @Test fun m11_intro() { val s = state(); s.showIntro = true; shot("m11-intro", s) }
+
+    @Test fun m20_today_hotel_requests() { shot("m20-today-from-warehouse", state()) }
+    @Test fun m21_warehouse_today() { val s = state(); s.hotelId = "wh"; s.alerts = emptyList(); s.corrections = emptyList(); s.stock = s.stock.map { it.copy(store = it.store * 10 + 300, low = false, out = false) }; shot("m21-warehouse-today", s) }
+    @Test fun m22_warehouse_deliveries() { val s = state(); s.hotelId = "wh"; s.tab = Tab.DELIVERIES; s.transfers = emptyList(); shot("m22-warehouse-deliveries", s) }
+    @Test fun m23_hotel_deliveries() { val s = state(); s.tab = Tab.DELIVERIES; shot("m23-hotel-deliveries", s) }
+    @Test fun m24_ask_card() {
+        val s = state()
+        s.chat = listOf(ChatMessage(Role.ME, ChatBody.Said("warehouse se 50 sabun mangwao", true, "hi")), ChatMessage(Role.APP, ChatBody.Ask(listOf(s.products[0] to 50))))
+        shot("m24-ask-card", s)
+    }
 }

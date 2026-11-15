@@ -82,6 +82,16 @@ class Api(private val store: Store, private val base: String = BuildConfig.API_B
     suspend fun resolve(id: String, reason: String, key: String) { post("/transfers/$id/resolve", """{"reason":"$reason"}""", key) }
     suspend fun dispatch(from: String, to: String, lines: List<DispatchLine>, key: String) { post("/transfers", json.encodeToString(DispatchBody.serializer(), DispatchBody(from, to, lines)), key) }
 
+    // Requests to the warehouse
+    suspend fun requests(hotelId: String): List<StockRequest> = json.decodeFromString(raw("GET", "/requests?hotelId=$hotelId"))
+    suspend fun topUp(hotelId: String): TopUp = json.decodeFromString(TopUp.serializer(), raw("GET", "/requests/top-up?hotelId=$hotelId"))
+    suspend fun createRequest(hotelId: String, lines: List<DispatchLine>, note: String? = null) { post("/requests", json.encodeToString(AskBody.serializer(), AskBody(hotelId, lines, note))) }
+    suspend fun dispatchRequest(id: String, lines: List<DispatchLine>?, key: String) { post("/requests/$id/dispatch", json.encodeToString(DispatchRequestBody.serializer(), DispatchRequestBody(lines)), key) }
+    suspend fun declineRequest(id: String, note: String? = null) { post("/requests/$id/decline", json.encodeToString(NoteBody.serializer(), NoteBody(note))) }
+    suspend fun schedules(hotelId: String): List<RequestSchedule> = json.decodeFromString(raw("GET", "/request-schedules?hotelId=$hotelId"))
+    suspend fun addSchedule(hotelId: String, weekday: Int, hour: Int) { post("/request-schedules", json.encodeToString(ScheduleBody.serializer(), ScheduleBody(hotelId, weekday, hour))) }
+    suspend fun deleteSchedule(id: String) { raw("DELETE", "/request-schedules/$id") }
+
     // Activity
     suspend fun reverse(eventId: String, reason: String, key: String) { post("/transactions/$eventId/reversal", json.encodeToString(ReasonBody.serializer(), ReasonBody(reason)), key) }
     suspend fun dismissCorrection(id: String) { post("/correction-requests/$id/dismiss", "{}") }
@@ -117,3 +127,7 @@ class Api(private val store: Store, private val base: String = BuildConfig.API_B
 @kotlinx.serialization.Serializable data class DispatchLine(val productId: String, val quantity: Int)
 @kotlinx.serialization.Serializable data class DispatchBody(val fromHotelId: String, val toHotelId: String, val lines: List<DispatchLine>)
 @kotlinx.serialization.Serializable data class ReasonBody(val reason: String)
+@kotlinx.serialization.Serializable data class AskBody(val hotelId: String, val lines: List<DispatchLine>, val note: String? = null)
+@kotlinx.serialization.Serializable data class DispatchRequestBody(val lines: List<DispatchLine>? = null)
+@kotlinx.serialization.Serializable data class NoteBody(val note: String? = null)
+@kotlinx.serialization.Serializable data class ScheduleBody(val hotelId: String, val weekday: Int, val hour: Int)

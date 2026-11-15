@@ -43,6 +43,10 @@ class AppState(ctx: Context, apiBase: String = BuildConfig.API_BASE) {
     var events by mutableStateOf<List<Event>>(emptyList())
     var attempts by mutableStateOf<List<VoiceAttempt>>(emptyList())
     var countSaving by mutableStateOf(false)
+    // Warehouse requests
+    var requests by mutableStateOf<List<StockRequest>>(emptyList())
+    var topUp by mutableStateOf<TopUp?>(null)
+    var schedules by mutableStateOf<List<RequestSchedule>>(emptyList())
 
     // Voice / conversation
     var chat by mutableStateOf<List<ChatMessage>>(emptyList())
@@ -56,6 +60,12 @@ class AppState(ctx: Context, apiBase: String = BuildConfig.API_BASE) {
     val hotel get() = me?.hotels?.firstOrNull { it.id == hotelId }
     val hotels get() = me?.hotels ?: emptyList()
     val cloudVoice get() = me?.config?.voiceProvider == "gemini"
+    /** Signed in at the central warehouse: this screen sends to hotels rather than asking. */
+    val isWarehouse get() = hotel?.isWarehouse == true
+    val warehouse get() = me?.hotels?.firstOrNull { it.isWarehouse }
+    val hasWarehouse get() = me?.warehouseId != null
+    val openRequests get() = requests.filter { it.status == "OPEN" }
+    val sentRequests get() = requests.filter { it.status == "SENT" }
     fun product(id: String?) = products.firstOrNull { it.id == id }
     val attentionCount get() = alerts.size + corrections.size
     /** On the count screen, spoken numbers are physical counts. */
@@ -99,6 +109,7 @@ class AppState(ctx: Context, apiBase: String = BuildConfig.API_BASE) {
             alerts = api.alerts(h).items
             corrections = runCatching { api.corrections(h) }.getOrDefault(emptyList())
             countStatus = runCatching { api.countStatus(h).firstOrNull() }.getOrNull()
+            if (hasWarehouse) requests = runCatching { api.requests(h) }.getOrDefault(emptyList())
         } catch (e: Exception) { handle(e) }
     }
     fun refresh() = scope.launch { loadAll(); loadTab(tab) }
@@ -118,6 +129,7 @@ class AppState(ctx: Context, apiBase: String = BuildConfig.API_BASE) {
                     val open = setOf("OPEN", "DISCREPANCY", "PARTIAL")
                     transfers = all.filter { it.status in open }
                     recentTransfers = all.filter { it.status !in open }.take(10)
+                    if (hasWarehouse) { requests = runCatching { api.requests(h) }.getOrDefault(emptyList()); if (!isWarehouse) schedules = runCatching { api.schedules(h) }.getOrDefault(emptyList()) }
                 }
                 Tab.ACTIVITY -> { events = api.activity(h).items; corrections = runCatching { api.corrections(h) }.getOrDefault(emptyList()) }
                 Tab.ATTEMPTS -> attempts = runCatching { api.voiceAttempts().attempts }.getOrDefault(emptyList())
@@ -133,6 +145,9 @@ class AppState(ctx: Context, apiBase: String = BuildConfig.API_BASE) {
         }
     }
     fun alertAction(a: Alert): Pair<String, Tab>? = when {
+        a.category == "LOW_STOCK_ASK_WAREHOUSE" -> t.askWarehouse to Tab.DELIVERIES
+        a.category == "LOW_STOCK_REQUESTED" -> t.requestSent to Tab.DELIVERIES
+        a.category == "STOCK_REQUEST" -> t.send to Tab.DELIVERIES
         a.category == "LOW_STOCK" -> t.seeStock to Tab.STOCK
         a.category == "COUNT_OVERDUE" -> t.startCount to Tab.COUNT
         a.category == "LARGE_VARIANCE" -> t.review to Tab.COUNT
@@ -212,6 +227,33 @@ class AppState(ctx: Context, apiBase: String = BuildConfig.API_BASE) {
         val lines = quantities.filter { it.value > 0 }.map { DispatchLine(it.key, it.value) }
         if (lines.isEmpty()) return@launch
         try { api.dispatch(h, to, lines, UUID.randomUUID().toString()); afterWrite() } catch (e: Exception) { handle(e) }
+    }
+
+    // ---------- warehouse requests ----------
+    /** Load what this hotel would ask for to get back to par, so the request sheet opens pre-filled. */
+    fun loadTopUp() = scope.launch { val h = hotelId ?: return@launch; topUp = runCatching { api.topUp(h) }.getOrNull() }
+    fun askWarehouse(quantities: Map<String, Int>, note: String? = null, onDone: (() -> Unit)? = null) = scope.launch {
+        val h = hotelId ?: return@launch
+        val lines = quantities.filter { it.value > 0 }.map { DispatchLine(it.key, it.value) }
+        if (lines.isEmpty()) return@launch
+        try { api.createRequest(h, lines, note); notice = Notice(t.requestSent, warn = false); loadAll(); loadTab(tab); onDone?.invoke() } catch (e: Exception) { handle(e) }
+    }
+    fun sendRequest(r: StockRequest, quantities: Map<String, Int>? = null) = scope.launch {
+        val lines = quantities?.filter { it.value > 0 }?.map { DispatchLine(it.key, it.value) }
+        try { api.dispatchRequest(r.id, lines, UUID.randomUUID().toString()); notice = Notice(t.sent2(r.hotel.name), warn = false); loadAll(); loadTab(tab) } catch (e: Exception) { handle(e) }
+    }
+    fun declineRequest(r: StockRequest) = scope.launch { try { api.declineRequest(r.id); loadAll(); loadTab(tab) } catch (e: Exception) { handle(e) } }
+    fun setAutoAsk(on: Boolean) = scope.launch {
+        val h = hotelId ?: return@launch
+        try {
+            if (on) api.addSchedule(h, 1, 7) else schedules.forEach { api.deleteSchedule(it.id) }
+            schedules = api.schedules(h)
+        } catch (e: Exception) { handle(e) }
+    }
+    /** The confirm button on a spoken request. */
+    fun confirmAsk(m: ChatMessage) {
+        val b = m.body as? ChatBody.Ask ?: return
+        askWarehouse(b.lines.associate { it.first.id to it.second }) { chat = chat.map { if (it.id == m.id) it.copy(body = b.copy(sent = true)) else it } }
     }
 
     // ---------- activity ----------
@@ -299,7 +341,19 @@ class AppState(ctx: Context, apiBase: String = BuildConfig.API_BASE) {
                 if (p.action == "TRANSFER_RECEIPT" || "USE_INCOMING_TRANSFERS" in p.warnings) { go(Tab.DELIVERIES); post(ChatBody.Text(t.deliveries, false)) }
                 else { val q = p.clarificationQuestion ?: t.notUnderstood; post(ChatBody.Text(q, true)); speak(mic, q, reply) }
             }
-            else -> { post(ChatBody.Text(t.notInApp, true)); speak(mic, t.notInApp, lang) }   // a stock movement: not recorded here
+            "READY_TO_CONFIRM" -> when (p.action) {
+                "REQUEST_FROM_WAREHOUSE" -> {
+                    val lines = p.lines.mapNotNull { l -> product(l.productId)?.let { it to (l.quantity ?: 0) } }.filter { it.second > 0 }
+                    when {
+                        isWarehouse || !hasWarehouse -> { post(ChatBody.Text(t.notInApp, true)); speak(mic, t.notInApp, lang) }
+                        lines.isEmpty() -> { post(ChatBody.Text(t.notUnderstood, true)); speak(mic, t.notUnderstood, reply) }
+                        else -> { post(ChatBody.Ask(lines)); speak(mic, t.askConfirm(lines.joinToString(", ") { "${it.second} ${it.first.name}" }), reply) }
+                    }
+                }
+                "TRANSFER_DISPATCH" -> if (isWarehouse) { go(Tab.DELIVERIES); post(ChatBody.Text(t.sendFromList, false)); speak(mic, t.sendFromList, reply) } else { post(ChatBody.Text(t.notInApp, true)); speak(mic, t.notInApp, lang) }
+                else -> { post(ChatBody.Text(t.notInApp, true)); speak(mic, t.notInApp, lang) }   // a stock movement: not recorded here
+            }
+            else -> { post(ChatBody.Text(t.notInApp, true)); speak(mic, t.notInApp, lang) }
         }
     }
 }

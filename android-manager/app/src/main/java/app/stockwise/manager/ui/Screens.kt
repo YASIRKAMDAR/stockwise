@@ -145,9 +145,9 @@ fun Shell(s: AppState, mic: Mic, drawerOpen: Boolean = false) {
             item(t.activity, Icons.Filled.History, Tab.ACTIVITY)
             HorizontalDivider(color = C.Line, modifier = Modifier.padding(vertical = 8.dp))
             if (s.hotels.size > 1) {
-                NavigationDrawerItem(label = { Text("${t.hotel}: ${s.hotel?.name ?: ""}", style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis) }, icon = { Icon(Icons.Filled.Apartment, null) }, selected = false, onClick = { pickHotel = !pickHotel }, modifier = Modifier.padding(horizontal = 8.dp))
+                NavigationDrawerItem(label = { Text("${if (s.isWarehouse) t.warehouse else t.hotel}: ${s.hotel?.name ?: ""}", style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis) }, icon = { Icon(Icons.Filled.Apartment, null) }, selected = false, onClick = { pickHotel = !pickHotel }, modifier = Modifier.padding(horizontal = 8.dp))
                 if (pickHotel) s.hotels.forEach { h ->
-                    NavigationDrawerItem(label = { Text(h.name, fontWeight = if (h.id == s.hotelId) FontWeight.Bold else FontWeight.Normal) }, selected = h.id == s.hotelId, onClick = { s.setHotel(h.id); pickHotel = false; scope.launch { drawer.close() } }, modifier = Modifier.padding(start = 40.dp, end = 8.dp), colors = colors)
+                    NavigationDrawerItem(label = { Text((if (h.isWarehouse) "🏭 " else "") + h.name, fontWeight = if (h.id == s.hotelId) FontWeight.Bold else FontWeight.Normal) }, selected = h.id == s.hotelId, onClick = { s.setHotel(h.id); pickHotel = false; scope.launch { drawer.close() } }, modifier = Modifier.padding(start = 40.dp, end = 8.dp), colors = colors)
                 }
             }
             Column(Modifier.padding(horizontal = 16.dp)) { Text(t.language, style = MaterialTheme.typography.bodyMedium); Spacer(Modifier.height(6.dp)); LangRow(s) }
@@ -299,6 +299,7 @@ fun ChatRow(s: AppState, m: ChatMessage) {
                 }
             }
         }
+        is ChatBody.Ask -> AskCard(s, m, b)
         is ChatBody.Counted -> AppBubble {
             Text(t.heardCount(b.items.size), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = C.Ink2)
             b.items.forEach { (name, qty) -> Row { Text(name, fontSize = 16.sp); Spacer(Modifier.weight(1f)); Text(qty?.toString() ?: "—", fontWeight = FontWeight.ExtraBold, fontSize = 17.sp, color = C.Mint) } }
@@ -340,9 +341,9 @@ fun Tag(text: String, color: Color = C.Indigo, bg: Color = C.IndigoWash) {
 }
 
 @Composable
-fun PillButton(text: String, modifier: Modifier = Modifier, filled: Boolean = false, color: Color = C.Mint, onClick: () -> Unit) {
-    if (filled) Button(onClick, modifier.height(40.dp), shape = RoundedCornerShape(20.dp), colors = ButtonDefaults.buttonColors(containerColor = color, contentColor = Color.White), contentPadding = PaddingValues(horizontal = 10.dp)) { Text(text, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1) }
-    else OutlinedButton(onClick, modifier.height(40.dp), shape = RoundedCornerShape(20.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = C.Ink), contentPadding = PaddingValues(horizontal = 10.dp)) { Text(text, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1) }
+fun PillButton(text: String, modifier: Modifier = Modifier, filled: Boolean = false, color: Color = C.Mint, enabled: Boolean = true, onClick: () -> Unit) {
+    if (filled) Button(onClick, modifier.height(40.dp), enabled = enabled, shape = RoundedCornerShape(20.dp), colors = ButtonDefaults.buttonColors(containerColor = color, contentColor = Color.White), contentPadding = PaddingValues(horizontal = 10.dp)) { Text(text, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1) }
+    else OutlinedButton(onClick, modifier.height(40.dp), enabled = enabled, shape = RoundedCornerShape(20.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = if (color == C.Brick) C.Brick else C.Ink), contentPadding = PaddingValues(horizontal = 10.dp)) { Text(text, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1) }
 }
 
 // ---------- Today ----------
@@ -350,14 +351,18 @@ fun PillButton(text: String, modifier: Modifier = Modifier, filled: Boolean = fa
 @Composable
 fun TodayScreen(s: AppState) {
     val t = s.t
+    var asking by remember { mutableStateOf(false) }
+    var changing by remember { mutableStateOf<StockRequest?>(null) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(t.greeting(s.me?.displayName?.substringBefore(' ') ?: ""), style = MaterialTheme.typography.headlineSmall)
         Text(t.needYou(s.attentionCount), style = MaterialTheme.typography.bodyMedium)
         if (s.attentionCount > 0) Panel {
             Text(t.needsAttention, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = C.Ink2)
             s.corrections.forEach { c -> AttentionRow(s, "LOW", t.asksToCorrect(c.requestedByName ?: c.displayName ?: ""), c.note, t.review to Tab.ACTIVITY) }
-            s.alerts.forEach { a -> AttentionRow(s, a.severity, a.title, a.detail, s.alertAction(a)) }
+            s.alerts.filter { it.category != "STOCK_REQUEST" }.forEach { a -> AttentionRow(s, a.severity, a.title, a.detail, s.alertAction(a)) }
         }
+        if (s.isWarehouse) HotelsAskingPanel(s) { changing = it }
+        else if (s.hasWarehouse) FromWarehousePanel(s) { asking = true }
         Text(t.storeNow, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = C.Ink2, modifier = Modifier.padding(top = 4.dp))
         val rows = s.stock.sortedWith(compareBy({ !it.low }, { it.name }))
         rows.chunked(2).forEach { pair ->
@@ -368,6 +373,8 @@ fun TodayScreen(s: AppState) {
         }
         Spacer(Modifier.height(40.dp))
     }
+    if (asking) AskSheet(s) { asking = false }
+    changing?.let { SendRequestSheet(s, it) { changing = null } }
 }
 
 @Composable

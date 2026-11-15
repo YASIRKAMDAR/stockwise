@@ -136,9 +136,13 @@ fun DeliveriesScreen(s: AppState) {
     val t = s.t
     var receiving by remember { mutableStateOf<Transfer?>(null) }
     var sendingTo by remember { mutableStateOf<Hotel?>(null) }
+    var asking by remember { mutableStateOf(false) }
+    var changing by remember { mutableStateOf<StockRequest?>(null) }
     val incoming = s.transfers.filter { it.toHotel.id == s.hotelId }
     val outgoing = s.transfers.filter { it.fromHotel.id == s.hotelId }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (s.isWarehouse) HotelsAskingPanel(s) { changing = it }
+        else if (s.hasWarehouse) { FromWarehousePanel(s) { asking = true }; AutoAskPanel(s) }
         if (s.transfers.isEmpty()) Text(t.noOpenDeliveries, color = C.Ink2)
         if (incoming.isNotEmpty()) {
             Text(t.incoming, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = C.Ink2)
@@ -148,10 +152,15 @@ fun DeliveriesScreen(s: AppState) {
             Text(t.outgoing, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = C.Ink2)
             outgoing.forEach { tr -> TransferCard(s, tr, incoming = false) {} }
         }
-        val others = s.hotels.filter { it.id != s.hotelId }
-        if (others.isNotEmpty()) Panel {
-            Text(t.sendStock, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = C.Ink2)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { others.forEach { h -> PillButton(t.toHotel(h.name), Modifier.weight(1f)) { sendingTo = h } } }
+        // Sending to another site. From the warehouse this is the main way out; between hotels it is tucked behind "Other hotels".
+        val others = s.hotels.filter { it.id != s.hotelId && !it.isWarehouse }
+        var showOthers by remember { mutableStateOf(s.isWarehouse || !s.hasWarehouse) }
+        if (others.isNotEmpty()) {
+            if (!showOthers) Text("${t.sendStock} · ${t.otherHotels} ›", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = C.Ink2, modifier = Modifier.clickable { showOthers = true }.padding(vertical = 4.dp))
+            else Panel {
+                Text(t.sendStock, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = C.Ink2)
+                others.chunked(3).forEach { row -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { row.forEach { h -> PillButton(t.toHotel(h.name), Modifier.weight(1f)) { sendingTo = h } } } }
+            }
         }
         if (s.recentTransfers.isNotEmpty()) {
             Text(t.lastWeek, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = C.Ink2)
@@ -169,6 +178,8 @@ fun DeliveriesScreen(s: AppState) {
         }
         Spacer(Modifier.height(40.dp))
     }
+    if (asking) AskSheet(s) { asking = false }
+    changing?.let { SendRequestSheet(s, it) { changing = null } }
     receiving?.let { tr ->
         var qty by remember(tr.id) { mutableStateOf(tr.lines.associate { it.productId to (it.sent - it.received - it.resolvedShort) }) }
         var final by remember { mutableStateOf(true) }
