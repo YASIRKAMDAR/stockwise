@@ -96,6 +96,14 @@ class EndToEndTest {
     }
     @After fun stopServer() { server.shutdown() }
 
+    /** waitUntil with a readable failure: what the app state and the fake server saw. */
+    private fun waitFor(s: AppState, what: String, timeout: Long = 10_000, cond: () -> Boolean) {
+        try { rule.waitUntil(timeout, cond) }
+        catch (e: androidx.compose.ui.test.ComposeTimeoutException) {
+            throw AssertionError("Timed out waiting for $what. loginError=${s.loginError} notice=${s.notice} busy=${s.busy} chat=${s.chat.size} sheet=${s.sheet != null} requests=${received.map { "${it.method} ${it.path}" }}", e)
+        }
+    }
+
     private fun state() = AppState(ApplicationProvider.getApplicationContext(), server.url("/").toString().trimEnd('/')).also { it.booting = false; it.lang = "en"; it.store.introSeen = true }
 
     private fun signIn(s: AppState) {
@@ -103,7 +111,7 @@ class EndToEndTest {
         rule.onNodeWithText("Employee code").performTextInput("M1")
         rule.onNodeWithText("Password").performTextInput("secret-pass")
         rule.onNodeWithText("Sign in").performClick()
-        rule.waitUntil(10_000) { s.me != null && s.stock.isNotEmpty() }
+        waitFor(s, "s.me != null && s.stock.isNotEmpty()", 10_000) { s.me != null && s.stock.isNotEmpty() }
         rule.waitForIdle()
     }
 
@@ -117,7 +125,7 @@ class EndToEndTest {
         // Ask by text (same server path as speech): the answer appears in the thread, nothing is written.
         rule.onNodeWithContentDescription("Ask: “how much soap is left?”").performTextInput("soap kitna bacha hai")
         rule.onNodeWithContentDescription("Send").performClick()
-        rule.waitUntil(10_000) { s.chat.any { it.body is ChatBody.Stock } }
+        waitFor(s, "s.chat.any { it.body is ChatBody.Stock }", 10_000) { s.chat.any { it.body is ChatBody.Stock } }
         rule.waitForIdle()
         rule.onNodeWithText("Soap kitna bacha hai?").assertIsDisplayed()
         rule.onNodeWithText("हिंदी").assertIsDisplayed()
@@ -129,17 +137,17 @@ class EndToEndTest {
         // Weekly count: start it, read two counts out, see the boxes fill and the sheet patched on the server.
         s.clearChat()
         s.go(Tab.COUNT)
-        rule.waitUntil(10_000) { s.countStatus != null }
+        waitFor(s, "s.countStatus != null", 10_000) { s.countStatus != null }
         rule.waitForIdle()
         rule.onNodeWithText("Weekly count overdue").assertIsDisplayed()
         rule.onNodeWithText("Start count").performClick()
-        rule.waitUntil(10_000) { s.sheet != null }
+        waitFor(s, "s.sheet != null", 10_000) { s.sheet != null }
         rule.waitForIdle()
         rule.onNodeWithText("0 of 2 counted").assertIsDisplayed()
         rule.onNodeWithContentDescription("Say: “soap forty-eight”").performTextInput("soap 48, shampoo 30")
         rule.onNodeWithContentDescription("Send").performClick()
-        rule.waitUntil(10_000) { s.sheet?.lines?.all { it.physicalQty != null } == true }
-        rule.waitUntil(10_000) { received.any { it.path == "/counts/c1/lines" && it.method == "PATCH" } }
+        waitFor(s, "s.sheet?.lines?.all { it.physicalQty != null } == true", 10_000) { s.sheet?.lines?.all { it.physicalQty != null } == true }
+        waitFor(s, "received.any { it.path == '/counts/c1/lines' && it.method == 'PATCH' }", 10_000) { received.any { it.path == "/counts/c1/lines" && it.method == "PATCH" } }
         rule.waitForIdle()
         rule.onNodeWithText("Heard 2 items").assertIsDisplayed()
         rule.onAllNodesWithText("48")[0].assertIsDisplayed()
@@ -151,10 +159,10 @@ class EndToEndTest {
         // Deliveries: "All arrived" posts a final receipt for the outstanding quantity.
         s.clearChat()
         s.go(Tab.DELIVERIES)
-        rule.waitUntil(10_000) { s.transfers.isNotEmpty() }
+        waitFor(s, "s.transfers.isNotEmpty()", 10_000) { s.transfers.isNotEmpty() }
         rule.waitForIdle()
         rule.onNodeWithText("All arrived").performClick()
-        rule.waitUntil(10_000) { received.any { it.path == "/transfers/t1/receipts" } }
+        waitFor(s, "received.any { it.path == '/transfers/t1/receipts' }", 10_000) { received.any { it.path == "/transfers/t1/receipts" } }
         val receipt = received.last { it.path == "/transfers/t1/receipts" }
         assertEquals("POST", receipt.method)
         assertTrue(receipt.getHeader("idempotency-key") != null)

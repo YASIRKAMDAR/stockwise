@@ -81,6 +81,14 @@ class EndToEndTest {
     }
     @After fun stopServer() { server.shutdown() }
 
+    /** waitUntil with a readable failure: what the app state and the fake server saw. */
+    private fun waitFor(s: AppState, what: String, timeout: Long = 10_000, cond: () -> Boolean) {
+        try { rule.waitUntil(timeout, cond) }
+        catch (e: androidx.compose.ui.test.ComposeTimeoutException) {
+            throw AssertionError("Timed out waiting for $what. loginError=${s.loginError} notice=${s.notice} busy=${s.busy} chat=${s.chat.size} requests=${received.map { "${it.method} ${it.path}" }}", e)
+        }
+    }
+
     private fun state() = AppState(ApplicationProvider.getApplicationContext(), server.url("/").toString().trimEnd('/')).also { it.booting = false; it.lang = "en" }
 
     @Test fun signIn_typeJob_confirm_savesOnce() {
@@ -91,14 +99,14 @@ class EndToEndTest {
         rule.onNodeWithText("Your code").performTextInput("S101")
         rule.onNodeWithText("Passcode").performTextInput("1234")
         rule.onNodeWithText("Sign in").performClick()
-        rule.waitUntil(10_000) { s.me != null }
-        rule.waitUntil(10_000) { s.products.isNotEmpty() }
+        waitFor(s, "s.me != null", 10_000) { s.me != null }
+        waitFor(s, "s.products.isNotEmpty()", 10_000) { s.products.isNotEmpty() }
         rule.onNodeWithText("Hold to talk").assertIsDisplayed()
 
         // Type what would have been said; the server reads it the same way as speech.
         rule.onNodeWithContentDescription("Type: room 203, 2 soap").performTextInput("room 203, 2 soap")
         rule.onNodeWithContentDescription("Send").performClick()
-        rule.waitUntil(10_000) { s.chat.any { it.body is ChatBody.Job } }
+        waitFor(s, "s.chat.any { it.body is ChatBody.Job }", 10_000) { s.chat.any { it.body is ChatBody.Job } }
         rule.waitForIdle()
 
         // The card shows Google's version of the words, the language tag, the room and the line. Nothing saved yet.
@@ -109,7 +117,7 @@ class EndToEndTest {
 
         // Confirm → one POST /transactions with an idempotency key and the proposal id → "Saved ✓ · A1B2C3".
         rule.onNodeWithText("Confirm").performClick()
-        rule.waitUntil(10_000) { s.chat.any { (it.body as? ChatBody.Job)?.state == ChatState.SAVED } }
+        waitFor(s, "s.chat.any { (it.body as? ChatBody.Job)?.state == ChatState.SAVED }", 10_000) { s.chat.any { (it.body as? ChatBody.Job)?.state == ChatState.SAVED } }
         rule.waitForIdle()
         rule.onNodeWithText("Saved ✓ · A1B2C3").assertIsDisplayed()
         val posts = received.filter { it.path == "/transactions" && it.method == "POST" }
@@ -123,7 +131,7 @@ class EndToEndTest {
         val before = received.size
         rule.onNodeWithContentDescription("Type: room 203, 2 soap").performTextInput("my bag")
         rule.onNodeWithContentDescription("Send").performClick()
-        rule.waitUntil(5_000) { s.chat.any { it.body is ChatBody.Bag } }
+        waitFor(s, "s.chat.any { it.body is ChatBody.Bag }", 5_000) { s.chat.any { it.body is ChatBody.Bag } }
         rule.waitForIdle()
         rule.onNodeWithText("In your bag").assertIsDisplayed()
         rule.onNode(hasText("8")).assertIsDisplayed()
@@ -136,10 +144,10 @@ class EndToEndTest {
         rule.onNodeWithText("Your code").performTextInput("S101")
         rule.onNodeWithText("Passcode").performTextInput("1234")
         rule.onNodeWithText("Sign in").performClick()
-        rule.waitUntil(10_000) { s.products.isNotEmpty() }
+        waitFor(s, "s.products.isNotEmpty()", 10_000) { s.products.isNotEmpty() }
         rule.onNodeWithContentDescription("Type: room 203, 2 soap").performTextInput("room 203, 2 soap")
         rule.onNodeWithContentDescription("Send").performClick()
-        rule.waitUntil(10_000) { s.chat.any { it.body is ChatBody.Job } }
+        waitFor(s, "s.chat.any { it.body is ChatBody.Job }", 10_000) { s.chat.any { it.body is ChatBody.Job } }
         rule.waitForIdle()
         rule.onNodeWithText("Cancel").performClick()
         rule.waitForIdle()
