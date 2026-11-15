@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material3.*
