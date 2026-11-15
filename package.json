@@ -14,9 +14,13 @@
     "db:seed:demo": "npm run db:seed:demo -w @stockwise/api",
     "dev:api": "npm run dev -w @stockwise/api",
     "dev:web": "npm run dev -w @stockwise/web",
-    "build:vercel": "node scripts/build-vercel.mjs"
+    "build:vercel": "node scripts/build-vercel.mjs",
+    "e2e": "bash scripts/e2e.sh"
   },
   "engines": {
     "node": "22.x"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
   }
 }

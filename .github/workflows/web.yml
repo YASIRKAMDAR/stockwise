@@ -1,0 +1,42 @@
+name: Server & web
+
+on:
+  push:
+    branches: [main]
+    paths: ['apps/**', 'packages/**', 'tests/**', 'scripts/e2e.sh', 'package*.json', '.github/workflows/web.yml']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_HOST_AUTH_METHOD: trust }
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql://postgres@localhost:5432/stockwise_test
+      E2E_DATABASE_URL: postgresql://postgres@localhost:5432/stockwise_e2e
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - name: Type-check
+        run: npm run typecheck -w @stockwise/api && npx tsc --noEmit -p apps/web
+      - name: API tests
+        run: |
+          psql postgresql://postgres@localhost:5432/postgres -c 'CREATE DATABASE stockwise_test'
+          npm test -w @stockwise/api
+      - name: Browser tests
+        run: |
+          npx playwright install --with-deps chromium
+          npm run e2e
+      - name: Keep failure traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with: { name: e2e-failures, path: /tmp/stockwise-e2e, if-no-files-found: ignore }
