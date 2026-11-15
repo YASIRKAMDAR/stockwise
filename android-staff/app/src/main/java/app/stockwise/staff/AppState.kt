@@ -167,7 +167,7 @@ class AppState(ctx: Context, apiBase: String = BuildConfig.API_BASE) {
         notice = null; answer = null
         post(ChatBody.Said(text, durationMs > 0), Role.ME)
         localCommand(text)?.let { applyCommand(it); return@launch }
-        run { api.interpret(h, text, lang, durationMs) }
+        ask { api.interpret(h, text, lang, durationMs) }
     }
 
     /** A recording: Google's model hears it, whatever mix of languages was spoken. The bubble shows what the phone heard until Google's version arrives. */
@@ -176,10 +176,11 @@ class AppState(ctx: Context, apiBase: String = BuildConfig.API_BASE) {
         notice = null; answer = null
         val bubble = ChatMessage(Role.ME, ChatBody.Said(if (heard.isBlank()) "…" else heard, true))
         chat = (chat + bubble).takeLast(40)
-        run(fromRecording = true, heard = heard, bubbleId = bubble.id) { api.interpretAudio(h, audio, lang, durationMs, heard) }
+        ask(fromRecording = true, heard = heard, bubbleId = bubble.id) { api.interpretAudio(h, audio, lang, durationMs, heard) }
     }
 
-    private suspend fun run(fromRecording: Boolean = false, heard: String = "", bubbleId: Long? = null, call: suspend () -> Proposal) {
+    /** Named so it can never be confused with Kotlin's own run-scope function, which silently swallowed typed text before. */
+    private suspend fun ask(fromRecording: Boolean = false, heard: String = "", bubbleId: Long? = null, call: suspend () -> Proposal) {
         busy = true; waitingLong = false; retryHeard = null
         // After 3 s the spinner says the app is still waiting for Google, so the screen never looks frozen.
         val waiter = scope.launch { delay(3000); waitingLong = true }

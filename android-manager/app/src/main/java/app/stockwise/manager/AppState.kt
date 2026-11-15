@@ -244,20 +244,20 @@ class AppState(ctx: Context, apiBase: String = BuildConfig.API_BASE) {
         notice = null
         post(ChatBody.Said(text, durationMs > 0), Role.ME)
         localCommand(text)?.let { applyLocal(it); return@launch }
-        run(mic) { api.interpret(h, text, lang, durationMs, voiceMode) }
+        ask(mic) { api.interpret(h, text, lang, durationMs, voiceMode) }
     }
     fun interpretAudio(audio: ByteArray, durationMs: Long, heard: String, mic: Mic) = scope.launch {
         val h = hotelId ?: return@launch
         notice = null
         val bubble = ChatMessage(Role.ME, ChatBody.Said(if (heard.isBlank()) "…" else heard, true))
         chat = (chat + bubble).takeLast(30)
-        run(mic, bubble.id, heard) { api.interpretAudio(h, audio, lang, durationMs, heard, voiceMode) }
+        ask(mic, bubble.id, heard) { api.interpretAudio(h, audio, lang, durationMs, heard, voiceMode) }
     }
     fun missed(mic: Mic) { post(ChatBody.Text(t.notUnderstood, true)); speak(mic, t.notUnderstood, lang) }
     private fun applyLocal(c: LocalCommand) {
         when (c) { is LocalCommand.Go -> go(c.tab); is LocalCommand.Language -> setLanguage(c.lang); LocalCommand.SignOut -> signOut() }
     }
-    private suspend fun run(mic: Mic, bubbleId: Long? = null, heard: String = "", call: suspend () -> Proposal) {
+    private suspend fun ask(mic: Mic, bubbleId: Long? = null, heard: String = "", call: suspend () -> Proposal) {
         busy = true; waitingLong = false; retryHeard = null
         val waiter: Job = scope.launch { delay(3000); waitingLong = true }
         try {

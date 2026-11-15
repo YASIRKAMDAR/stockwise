@@ -97,6 +97,8 @@ class EndToEndTest {
         server.start()
     }
     @After fun stopServer() { server.shutdown() }
+    /** The value of one multipart field (parts carry a Content-Length line before the blank line). */
+    private fun part(form: String, name: String): String? = Regex("name=\"" + name + "\"[\\s\\S]*?\\r\\n\\r\\n([^\\r]*)").find(form)?.groupValues?.get(1)
     private fun pump() { org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle(); rule.waitForIdle() }
 
     /** Waits for a condition while pumping the main looper (coroutines on Dispatchers.Main and OkHttp callbacks land there), with a readable failure. */
@@ -140,7 +142,7 @@ class EndToEndTest {
         rule.onNodeWithText("14 with staff").assertExists()
         val interpret = received.last { it.path?.endsWith("/voice/interpret") == true }
         val form = interpret.body.readUtf8()
-        assertTrue(form.contains("name=\"scope\"\r\n\r\nall") && form.contains("name=\"client\"\r\n\r\nandroid-manager") && !form.contains("name=\"mode\""))
+        assertEquals("all", part(form, "scope")); assertEquals("android-manager", part(form, "client")); assertEquals(null, part(form, "mode"))
 
         // Weekly count: start it, read two counts out, see the boxes fill and the sheet patched on the server.
         s.clearChat()
@@ -162,7 +164,7 @@ class EndToEndTest {
         rule.onNodeWithText("2 of 2 counted").assertExists()
         rule.onNodeWithText("Differs from the book — why?").assertExists()      // soap 48 vs book 50
         val countForm = received.last { it.path?.endsWith("/voice/interpret") == true }.body.readUtf8()
-        assertTrue(countForm.contains("name=\"mode\"\r\n\r\ncount"))
+        assertEquals("count", part(countForm, "mode"))
 
         // Deliveries: "All arrived" posts a final receipt for the outstanding quantity.
         s.clearChat()
