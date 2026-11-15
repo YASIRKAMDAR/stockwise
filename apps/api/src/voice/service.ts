@@ -14,7 +14,7 @@ const LARGE_QTY = 200;
 const norm = (s: string) => normalizeDigits(s.toLowerCase().normalize('NFC')).replace(/[^\p{L}\p{M}\p{N} ]/gu, '').replace(/\s+/g, ' ').trim();
 const singular = (s: string) => s.replace(/(es|s)$/u, '');
 
-export interface InterpretInput { audio: Buffer; mimeType: string; hotelId: string; preferredLanguage?: string; durationMs?: number; scopeAll?: boolean; client?: string; heardText?: string }
+export interface InterpretInput { audio: Buffer; mimeType: string; hotelId: string; preferredLanguage?: string; durationMs?: number; scopeAll?: boolean; client?: string; heardText?: string; mode?: 'count' }
 const INFO_ACTIONS = new Set(['SHOW_ALERTS', 'SHOW_TRANSFERS', 'SHOW_ROOM_USE', 'SHOW_CHANGES', 'START_COUNT']);
 
 async function loadCatalog(db: Db, orgId: string, hotelId: string) {
@@ -65,6 +65,7 @@ export async function interpret(db: Db, cfg: Config, provider: VoiceProvider | n
     products: cat.products.map((p) => ({ sku: p.sku, name: p.name, unit: p.unit, aliases: p.aliases })),
     rooms: cat.rooms.length <= 300 ? cat.rooms.map((r) => r.room_number) : null,
     preferredLanguage: input.preferredLanguage,
+    mode: input.mode,
   };
 
   const started = Date.now();
@@ -124,7 +125,7 @@ export async function interpret(db: Db, cfg: Config, provider: VoiceProvider | n
     const product = matches.length === 1 ? matches[0] : null;
     if (!matches.length) issues.push('UNKNOWN_PRODUCT');
     if (matches.length > 1) issues.push('AMBIGUOUS_PRODUCT');
-    if (it.quantity == null) issues.push('MISSING_QUANTITY');
+    if (it.quantity == null || (it.quantity === 0 && out.action !== 'COUNT_ENTRY')) issues.push('MISSING_QUANTITY');
     else if (it.quantity > LARGE_QTY) issues.push('CHECK_QUANTITY');
     let room: { id: string; room_number: string } | null = null;
     if (out.action === 'PLACE_IN_ROOM') {
@@ -156,6 +157,7 @@ export async function interpret(db: Db, cfg: Config, provider: VoiceProvider | n
 
   let status: VoiceProposal['status'] = 'READY_TO_CONFIRM';
   let queryResult: unknown;
+  let proposal_question: string | null = null;
   if (out.action === 'STOCK_QUERY') {
     status = 'QUERY_RESULT';
     let qHotels = [targetHotel?.id ?? input.hotelId];
@@ -167,6 +169,10 @@ export async function interpret(db: Db, cfg: Config, provider: VoiceProvider | n
   } else if (INFO_ACTIONS.has(out.action)) {
     // Opens a screen in the app; nothing is written. targetHotelId (if spoken) narrows the screen.
     status = 'NAVIGATE';
+  } else if (out.action === 'COUNT_ENTRY') {
+    // Physical counts read out during the weekly count. The app writes them to the count sheet; this proposal is never confirmed as a movement.
+    status = lines.length && lines.every((l) => l.productId && (l.quantity != null || out.notes === 'same')) ? 'COUNT_ENTRY' : 'NEEDS_CLARIFICATION';
+    if (status === 'NEEDS_CLARIFICATION' && !out.clarificationQuestion) proposal_question = lines.some((l) => !l.productId) ? 'Which item?' : 'How many?';
   } else if (out.action === 'TRANSFER_RECEIPT') {
     status = 'NEEDS_CLARIFICATION';
     warnings.push('USE_INCOMING_TRANSFERS');
@@ -177,7 +183,7 @@ export async function interpret(db: Db, cfg: Config, provider: VoiceProvider | n
   const expiresAt = new Date(Date.now() + cfg.VOICE_PROPOSAL_TTL_MINUTES * 60_000);
   const proposal: Omit<VoiceProposal, 'proposalId'> = {
     status, detectedLanguage: out.language, transcript: out.transcript, action: out.action, targetHotelId: targetHotel?.id ?? null,
-    lines, warnings, clarificationQuestion: out.clarificationQuestion, expiresAt: expiresAt.toISOString(), queryResult,
+    lines, warnings, clarificationQuestion: out.clarificationQuestion ?? proposal_question, expiresAt: expiresAt.toISOString(), queryResult,
   };
   const saved = await db.query(
     `INSERT INTO voice_proposals (organization_id, user_id, hotel_id, proposal, expires_at) VALUES ($1,$2,$3,$4,$5) RETURNING id`,

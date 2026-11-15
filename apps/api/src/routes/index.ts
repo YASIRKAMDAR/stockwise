@@ -435,7 +435,7 @@ export async function registerRoutes(app: FastifyInstance, { db, cfg, provider }
     return interpret(db, cfg, provider, a, {
       audio, mimeType: mime, hotelId: parse(uuid, fields.hotelId),
       preferredLanguage: fields.preferredLanguage, durationMs: fields.durationMs ? Number(fields.durationMs) : undefined, scopeAll: fields.scope === 'all',
-      client: fields.client, heardText: fields.heard?.slice(0, 500),
+      client: fields.client, heardText: fields.heard?.slice(0, 500), mode: fields.mode === 'count' ? 'count' : undefined,
     });
   });
 }

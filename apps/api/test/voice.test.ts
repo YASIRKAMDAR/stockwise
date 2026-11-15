@@ -8,8 +8,8 @@ let w: World;
 let s1: Client, owner: Client;
 const fixtures = JSON.parse(readFileSync(new URL('../../../tests/voice-fixtures/sample_utterances.json', import.meta.url), 'utf8'));
 
-async function interpret(c: Client, text: string, mime = 'text/plain', hotel = 0) {
-  const f = multipart({ hotelId: w.h[hotel] }, text, mime);
+async function interpret(c: Client, text: string, mime = 'text/plain', hotel = 0, extra: Record<string, string> = {}) {
+  const f = multipart({ hotelId: w.h[hotel], ...extra }, text, mime);
   const r = await w.app.inject({ method: 'POST', url: '/api/v1/voice/interpret', payload: f.body, headers: { ...f.headers, cookie: c.cookie, 'x-requested-with': 'stockwise' } });
   return { status: r.statusCode, body: r.json() };
 }
@@ -137,6 +137,23 @@ describe('Gemini adapter (HTTP contract, mocked fetch — no live call)', () => 
   it('invalid JSON from the model is an error, never a best-effort proposal', async () => {
     const p = new GeminiProvider(cfg, (async () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: 'not json' }] } }] }), { status: 200 })) as any);
     await expect(p.extract(Buffer.from('a'), 'audio/webm', ctx)).rejects.toMatchObject({ code: 'TEMPORARY_UNAVAILABLE' });
+  });
+});
+
+describe('Weekly count by voice', () => {
+  it('mode=count turns "soap 48, shampoo 30" into a COUNT_ENTRY with quantities, never a movement', async () => {
+    const v = await interpret(owner, 'soap 48, shampoo 30', 'text/plain', 0, { mode: 'count' });
+    expect(v.status).toBe(200);
+    expect(v.body.action).toBe('COUNT_ENTRY');
+    expect(v.body.status).toBe('COUNT_ENTRY');
+    expect(v.body.lines.map((l: any) => [l.productName, l.quantity])).toEqual([['Soap', 48], ['Shampoo', 30]]);
+    // Same words without count mode are a store checkout, as for staff.
+    // Zero is a real count ("soap zero"); so is product-first Hindi.
+    const z = await interpret(owner, 'soap zero, shampoo tees', 'text/plain', 0, { mode: 'count' });
+    expect(z.status).toBe(200);
+    expect(z.body.lines.map((l: any) => l.quantity)).toEqual([0, 30]);
+    const v2 = await interpret(owner, 'soap 48, shampoo 30');
+    expect(v2.body.action).not.toBe('COUNT_ENTRY');
   });
 });
 

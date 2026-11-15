@@ -39,6 +39,7 @@ export const VOICE_ACTIONS = [
   'SHOW_ROOM_USE',
   'SHOW_CHANGES',
   'START_COUNT',
+  'COUNT_ENTRY',
   'UNKNOWN',
 ] as const;
 export const NAVIGATE_ACTIONS = ['SHOW_ALERTS', 'SHOW_TRANSFERS', 'SHOW_ROOM_USE', 'SHOW_CHANGES', 'START_COUNT'] as const;
@@ -177,7 +178,7 @@ export const CreateUserBody = z.object({
 export const VoiceModelItem = z
   .object({
     spokenProduct: z.string().max(80),
-    quantity: z.number().int().min(1).max(100000).nullable(),
+    quantity: z.number().int().min(0).max(100000).nullable(),
     roomNumber: z.string().max(12).nullable(),
     targetHotelCode: z.string().max(20).nullable(),
     sourceHint: z.enum(['STORE', 'MY_STOCK']).nullable(),
@@ -209,7 +210,7 @@ export interface ProposalLine {
 }
 export interface VoiceProposal {
   proposalId: string;
-  status: 'READY_TO_CONFIRM' | 'NEEDS_CLARIFICATION' | 'QUERY_RESULT' | 'NAVIGATE';
+  status: 'READY_TO_CONFIRM' | 'NEEDS_CLARIFICATION' | 'QUERY_RESULT' | 'NAVIGATE' | 'COUNT_ENTRY';
   detectedLanguage: string;
   transcript: string;
   action: VoiceAction;

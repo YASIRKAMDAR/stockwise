@@ -12,7 +12,7 @@ export const normalizeDigits = (s: string) => s.replace(/[૦-૯०-९]/g, (c)
 
 const WORDS: Record<string, number> = {
   zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, twenty: 20, thirty: 30, forty: 40, fifty: 50, hundred: 100,
-  ek: 1, do: 2, teen: 3, char: 4, chaar: 4, paanch: 5, panch: 5, chhe: 6, saat: 7, aath: 8, nau: 9, das: 10, bees: 20, pachees: 25, pachaas: 50, sau: 100,
+  ek: 1, do: 2, teen: 3, char: 4, chaar: 4, paanch: 5, panch: 5, chhe: 6, saat: 7, aath: 8, nau: 9, das: 10, bees: 20, pachees: 25, tees: 30, chalees: 40, chaalis: 40, pachaas: 50, saath: 60, sattar: 70, assi: 80, nabbe: 90, sau: 100, shunya: 0, 'शून्य': 0, 'શૂન્ય': 0, 'तीस': 30, 'ત્રીસ': 30, 'चालीस': 40, 'ચાલીસ': 40, 'साठ': 60, 'સાઠ': 60, 'सत्तर': 70, 'સિત્તેર': 70, 'अस्सी': 80, 'એંસી': 80, 'नब्बे': 90, 'નેવું': 90,
   'एक': 1, 'दो': 2, 'तीन': 3, 'चार': 4, 'पांच': 5, 'पाँच': 5, 'छह': 6, 'सात': 7, 'आठ': 8, 'नौ': 9, 'दस': 10, 'बीस': 20, 'पच्चीस': 25, 'पचास': 50, 'सौ': 100,
   'એક': 1, 'બે': 2, 'ત્રણ': 3, 'ચાર': 4, 'પાંચ': 5, 'છ': 6, 'સાત': 7, 'આઠ': 8, 'નવ': 9, 'દસ': 10, 'વીસ': 20, 'પચીસ': 25, 'પચાસ': 50, 'સો': 100,
 };
@@ -89,7 +89,16 @@ export function fakeParse(input: string, ctx: CatalogContext) {
   const items = hits.map((h) => {
     const tokIdx = toks.findIndex((k) => k.start >= h.pos);
     let qty: number | null = null;
-    for (let j = tokIdx - 1; j >= 0 && j >= tokIdx - 4; j--) {
+    if (ctx.mode === 'count') {
+      // Counting is read product-first ("soap 48, shampoo 30"): the number after the product, before the next one.
+      const spokenToks = h.spoken.split(/\s+/).length;
+      for (let j = tokIdx + spokenToks; j < toks.length && j <= tokIdx + spokenToks + 2; j++) {
+        if (used.has(j) || hits.some((o) => o !== h && toks[j].start >= o.pos && toks[j].start < o.pos + o.spoken.length)) break;
+        const n = num(toks[j].text);
+        if (n != null && n >= 0) { qty = n; used.add(j); break; }
+      }
+    }
+    for (let j = tokIdx - 1; qty == null && j >= 0 && j >= tokIdx - 4; j--) {
       if (used.has(j)) continue;
       const n = num(toks[j].text);
       if (n != null && n > 0) { qty = n; used.add(j); break; }
@@ -98,7 +107,7 @@ export function fakeParse(input: string, ctx: CatalogContext) {
     const sourceHint = /store se|storeroom|स्टोर से|સ્ટોરમાંથી|from (the )?store/.test(t) ? 'STORE' : null;
     return { spokenProduct: h.spoken, quantity: qty, roomNumber: room, targetHotelCode: hotelCode, sourceHint };
   });
-  let action = detectAction(t);
+  let action = ctx.mode === 'count' && hits.length ? 'COUNT_ENTRY' : detectAction(t);
   // "Room 203, two soap" with no verb: a room plus items means items were put in the room.
   if (action === 'UNKNOWN' && rooms.length && hits.length) action = 'PLACE_IN_ROOM';
   // "From the store, ten soap" / "store se das sabun" with no verb and no room: taking stock into the bag.
@@ -106,6 +115,7 @@ export function fakeParse(input: string, ctx: CatalogContext) {
   // A room was named, so "took ... put in room" style sentences are about the room, not the bag.
   if (action === 'CHECKOUT_TO_STAFF' && rooms.length && hits.length) action = 'PLACE_IN_ROOM';
   const INFO = new Set(['STOCK_QUERY', 'SHOW_ALERTS', 'SHOW_TRANSFERS', 'SHOW_ROOM_USE', 'SHOW_CHANGES', 'START_COUNT']);
+  if (action === 'COUNT_ENTRY') return { language: lang, action, transcript, items, clarificationNeeded: false, clarificationQuestion: null, notes: null };
   const missingQty = items.some((i) => i.quantity == null) && !INFO.has(action);
   const corrected = toks.some((k) => NEG.test(k.text));
   return {
