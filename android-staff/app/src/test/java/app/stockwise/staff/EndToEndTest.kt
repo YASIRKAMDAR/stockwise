@@ -4,7 +4,6 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasClickAction
-import androidx.compose.ui.test.onAllNodes
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -83,13 +82,19 @@ class EndToEndTest {
         server.start()
     }
     @After fun stopServer() { server.shutdown() }
+    private fun pump() { org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle(); rule.waitForIdle() }
 
-    /** waitUntil with a readable failure: what the app state and the fake server saw. */
+    /** Waits for a condition while pumping the main looper (coroutines on Dispatchers.Main and OkHttp callbacks land there), with a readable failure. */
     private fun waitFor(s: AppState, what: String, timeout: Long = 10_000, cond: () -> Boolean) {
-        try { rule.waitUntil(timeout, cond) }
-        catch (e: androidx.compose.ui.test.ComposeTimeoutException) {
-            throw AssertionError("Timed out waiting for $what. loginError=${s.loginError} notice=${s.notice} busy=${s.busy} chat=${s.chat.size} requests=${received.map { "${it.method} ${it.path}" }}", e)
+        val end = System.currentTimeMillis() + timeout
+        while (!cond()) {
+            if (System.currentTimeMillis() > end) throw AssertionError("Timed out waiting for $what. loginError=${s.loginError} notice=${s.notice} busy=${s.busy} chat=${s.chat.size} requests=${received.map { "${it.method} ${it.path}" }}")
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+            rule.waitForIdle()
+            Thread.sleep(25)
         }
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+        rule.waitForIdle()
     }
 
     private fun state() = AppState(ApplicationProvider.getApplicationContext(), server.url("/").toString().trimEnd('/')).also { it.booting = false; it.lang = "en" }
@@ -101,14 +106,14 @@ class EndToEndTest {
         // Sign in with code + passcode.
         rule.onAllNodes(hasSetTextAction())[0].performTextInput("S101")
         rule.onAllNodes(hasSetTextAction())[1].performTextInput("1234")
-        rule.onNode(hasText("Sign in") and hasClickAction()).performClick()
+        rule.onNode(hasText("Sign in") and hasClickAction()).performClick(); pump()
         waitFor(s, "s.me != null", 10_000) { s.me != null }
         waitFor(s, "s.products.isNotEmpty()", 10_000) { s.products.isNotEmpty() }
         rule.onNodeWithText("Hold to talk").assertIsDisplayed()
 
         // Type what would have been said; the server reads it the same way as speech.
         rule.onNodeWithContentDescription("Type: room 203, 2 soap").performTextInput("room 203, 2 soap")
-        rule.onNodeWithContentDescription("Send").performClick()
+        rule.onNodeWithContentDescription("Send").performClick(); pump()
         waitFor(s, "s.chat.any { it.body is ChatBody.Job }", 10_000) { s.chat.any { it.body is ChatBody.Job } }
         rule.waitForIdle()
 
@@ -119,7 +124,7 @@ class EndToEndTest {
         assertTrue(received.none { it.path == "/transactions" && it.method == "POST" })
 
         // Confirm → one POST /transactions with an idempotency key and the proposal id → "Saved ✓ · A1B2C3".
-        rule.onNodeWithText("Confirm").performClick()
+        rule.onNodeWithText("Confirm").performClick(); pump()
         waitFor(s, "s.chat.any { (it.body as? ChatBody.Job)?.state == ChatState.SAVED }", 10_000) { s.chat.any { (it.body as? ChatBody.Job)?.state == ChatState.SAVED } }
         rule.waitForIdle()
         rule.onNodeWithText("Saved ✓ · A1B2C3").assertIsDisplayed()
@@ -133,7 +138,7 @@ class EndToEndTest {
         // "my bag" is answered in the thread without a server call.
         val before = received.size
         rule.onNodeWithContentDescription("Type: room 203, 2 soap").performTextInput("my bag")
-        rule.onNodeWithContentDescription("Send").performClick()
+        rule.onNodeWithContentDescription("Send").performClick(); pump()
         waitFor(s, "s.chat.any { it.body is ChatBody.Bag }", 5_000) { s.chat.any { it.body is ChatBody.Bag } }
         rule.waitForIdle()
         rule.onNodeWithText("In your bag").assertIsDisplayed()
@@ -146,13 +151,13 @@ class EndToEndTest {
         rule.setContent { StaffApp(s, mic) }
         rule.onAllNodes(hasSetTextAction())[0].performTextInput("S101")
         rule.onAllNodes(hasSetTextAction())[1].performTextInput("1234")
-        rule.onNode(hasText("Sign in") and hasClickAction()).performClick()
+        rule.onNode(hasText("Sign in") and hasClickAction()).performClick(); pump()
         waitFor(s, "s.products.isNotEmpty()", 10_000) { s.products.isNotEmpty() }
         rule.onNodeWithContentDescription("Type: room 203, 2 soap").performTextInput("room 203, 2 soap")
-        rule.onNodeWithContentDescription("Send").performClick()
+        rule.onNodeWithContentDescription("Send").performClick(); pump()
         waitFor(s, "s.chat.any { it.body is ChatBody.Job }", 10_000) { s.chat.any { it.body is ChatBody.Job } }
         rule.waitForIdle()
-        rule.onNodeWithText("Cancel").performClick()
+        rule.onNodeWithText("Cancel").performClick(); pump()
         rule.waitForIdle()
         rule.onNodeWithText("Cancelled").assertIsDisplayed()
         assertTrue(received.none { it.path == "/transactions" && it.method == "POST" })

@@ -98,13 +98,19 @@ class EndToEndTest {
         server.start()
     }
     @After fun stopServer() { server.shutdown() }
+    private fun pump() { org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle(); rule.waitForIdle() }
 
-    /** waitUntil with a readable failure: what the app state and the fake server saw. */
+    /** Waits for a condition while pumping the main looper (coroutines on Dispatchers.Main and OkHttp callbacks land there), with a readable failure. */
     private fun waitFor(s: AppState, what: String, timeout: Long = 10_000, cond: () -> Boolean) {
-        try { rule.waitUntil(timeout, cond) }
-        catch (e: androidx.compose.ui.test.ComposeTimeoutException) {
-            throw AssertionError("Timed out waiting for $what. loginError=${s.loginError} notice=${s.notice} busy=${s.busy} chat=${s.chat.size} sheet=${s.sheet != null} requests=${received.map { "${it.method} ${it.path}" }}", e)
+        val end = System.currentTimeMillis() + timeout
+        while (!cond()) {
+            if (System.currentTimeMillis() > end) throw AssertionError("Timed out waiting for $what. loginError=${s.loginError} notice=${s.notice} busy=${s.busy} chat=${s.chat.size} requests=${received.map { "${it.method} ${it.path}" }}")
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+            rule.waitForIdle()
+            Thread.sleep(25)
         }
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+        rule.waitForIdle()
     }
 
     private fun state() = AppState(ApplicationProvider.getApplicationContext(), server.url("/").toString().trimEnd('/')).also { it.booting = false; it.lang = "en"; it.store.introSeen = true }
@@ -113,7 +119,7 @@ class EndToEndTest {
         rule.setContent { ManagerApp(s, mic) }
         rule.onAllNodes(hasSetTextAction())[0].performTextInput("M1")
         rule.onAllNodes(hasSetTextAction())[1].performTextInput("secret-pass")
-        rule.onNode(hasText("Sign in") and hasClickAction()).performClick()
+        rule.onNode(hasText("Sign in") and hasClickAction()).performClick(); pump()
         waitFor(s, "s.me != null && s.stock.isNotEmpty()", 10_000) { s.me != null && s.stock.isNotEmpty() }
         rule.waitForIdle()
     }
@@ -127,7 +133,7 @@ class EndToEndTest {
 
         // Ask by text (same server path as speech): the answer appears in the thread, nothing is written.
         rule.onNodeWithContentDescription("Ask: “how much soap is left?”").performTextInput("soap kitna bacha hai")
-        rule.onNodeWithContentDescription("Send").performClick()
+        rule.onNodeWithContentDescription("Send").performClick(); pump()
         waitFor(s, "s.chat.any { it.body is ChatBody.Stock }", 10_000) { s.chat.any { it.body is ChatBody.Stock } }
         rule.waitForIdle()
         rule.onNodeWithText("Soap kitna bacha hai?").assertIsDisplayed()
@@ -143,12 +149,12 @@ class EndToEndTest {
         waitFor(s, "s.countStatus != null", 10_000) { s.countStatus != null }
         rule.waitForIdle()
         rule.onNodeWithText("Weekly count overdue").assertIsDisplayed()
-        rule.onNodeWithText("Start count").performClick()
+        rule.onNodeWithText("Start count").performClick(); pump()
         waitFor(s, "s.sheet != null", 10_000) { s.sheet != null }
         rule.waitForIdle()
         rule.onNodeWithText("0 of 2 counted").assertIsDisplayed()
         rule.onNodeWithContentDescription("Say: “soap forty-eight”").performTextInput("soap 48, shampoo 30")
-        rule.onNodeWithContentDescription("Send").performClick()
+        rule.onNodeWithContentDescription("Send").performClick(); pump()
         waitFor(s, "s.sheet?.lines?.all { it.physicalQty != null } == true", 10_000) { s.sheet?.lines?.all { it.physicalQty != null } == true }
         waitFor(s, "received.any { it.path == '/counts/c1/lines' && it.method == 'PATCH' }", 10_000) { received.any { it.path == "/counts/c1/lines" && it.method == "PATCH" } }
         rule.waitForIdle()
@@ -164,7 +170,7 @@ class EndToEndTest {
         s.go(Tab.DELIVERIES)
         waitFor(s, "s.transfers.isNotEmpty()", 10_000) { s.transfers.isNotEmpty() }
         rule.waitForIdle()
-        rule.onNodeWithText("All arrived").performClick()
+        rule.onNodeWithText("All arrived").performClick(); pump()
         waitFor(s, "received.any { it.path == '/transfers/t1/receipts' }", 10_000) { received.any { it.path == "/transfers/t1/receipts" } }
         val receipt = received.last { it.path == "/transfers/t1/receipts" }
         assertEquals("POST", receipt.method)
