@@ -1,0 +1,30 @@
+name: iPhone project (ready to open in Xcode)
+
+on:
+  push:
+    branches: [main]
+    paths: ['ios-staff/**', '.github/workflows/ios-project.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Generate the Xcode project and zip it
+        run: |
+          brew install xcodegen
+          cd ios-staff && xcodegen generate
+          cd .. && mv ios-staff StockwiseStaff-iOS && zip -qr StockwiseStaff-iOS.zip StockwiseStaff-iOS -x '*/build/*'
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: staff-ios-project
+          name: Stockwise Staff (iPhone) Xcode project
+          prerelease: true
+          make_latest: false
+          files: StockwiseStaff-iOS.zip
+          body: Open StockwiseStaff.xcodeproj in Xcode and press Run. Rebuilt on every change to the iPhone app.
