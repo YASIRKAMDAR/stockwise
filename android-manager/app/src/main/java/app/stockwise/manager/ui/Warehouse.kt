@@ -77,12 +77,13 @@ fun HotelsAskingPanel(s: AppState, onChange: (StockRequest) -> Unit) {
 }
 
 /** Hotel: pick quantities (pre-filled to par) and send the request. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AskSheet(s: AppState, onClose: () -> Unit) {
     val t = s.t
     LaunchedEffect(s.hotelId) { s.loadTopUp() }
     val top = s.topUp
-    var qty by remember(top) { mutableStateOf(top?.lines?.associate { it.productId to it.quantity } ?: emptyMap()) }
+    var qty by remember(top) { mutableStateOf<Map<String, Int>>(top?.lines?.associate { it.productId to it.quantity } ?: emptyMap()) }
     ModalBottomSheet(onDismissRequest = onClose, containerColor = C.Linen) {
         Column(Modifier.padding(20.dp).padding(bottom = 24.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(t.askWarehouse, fontSize = 20.sp, fontWeight = FontWeight.Bold)
@@ -105,10 +106,11 @@ fun AskSheet(s: AppState, onClose: () -> Unit) {
 }
 
 /** Warehouse: change what goes out before sending. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SendRequestSheet(s: AppState, r: StockRequest, onClose: () -> Unit) {
     val t = s.t
-    var qty by remember(r.id) { mutableStateOf(r.lines.associate { it.productId to it.quantity.coerceAtMost(it.warehouseStock) }) }
+    var qty by remember(r.id) { mutableStateOf<Map<String, Int>>(r.lines.associate { it.productId to it.quantity.coerceAtMost(it.warehouseStock) }) }
     ModalBottomSheet(onDismissRequest = onClose, containerColor = C.Linen) {
         Column(Modifier.padding(20.dp).padding(bottom = 24.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("${t.send} · ${r.hotel.name}", fontSize = 20.sp, fontWeight = FontWeight.Bold)
