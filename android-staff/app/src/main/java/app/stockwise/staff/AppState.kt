@@ -21,10 +21,10 @@ data class Flow(
 data class Notice(val text: String, val warn: Boolean = true)
 
 /** All app state. Screens read it and call its functions; it talks to the server. */
-class AppState(ctx: Context) {
+class AppState(ctx: Context, apiBase: String = BuildConfig.API_BASE) {
     val app: Context = ctx.applicationContext
     val store = Store(app)
-    val api = Api(store)
+    val api = Api(store, apiBase)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     var lang by mutableStateOf(store.lang)

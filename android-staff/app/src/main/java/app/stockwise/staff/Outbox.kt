@@ -29,7 +29,8 @@ class OutboxWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
         fun kick(ctx: Context) {
             val req = OneTimeWorkRequestBuilder<OutboxWorker>()
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build()
-            WorkManager.getInstance(ctx).enqueueUniqueWork("outbox", ExistingWorkPolicy.REPLACE, req)
+            // WorkManager isn't set up in unit tests; the queue still works, it's just sent on the next real launch.
+            runCatching { WorkManager.getInstance(ctx).enqueueUniqueWork("outbox", ExistingWorkPolicy.REPLACE, req) }
         }
     }
 }

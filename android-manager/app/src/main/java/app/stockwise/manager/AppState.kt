@@ -14,10 +14,10 @@ import kotlinx.coroutines.launch
 import java.util.UUID
 
 /** Everything the manager app knows: who's signed in, which hotel, the screens' data, and the voice conversation. */
-class AppState(ctx: Context) {
+class AppState(ctx: Context, apiBase: String = BuildConfig.API_BASE) {
     val app: Context = ctx.applicationContext
     val store = Store(app)
-    val api = Api(store)
+    val api = Api(store, apiBase)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     var lang by mutableStateOf(store.lang)
