@@ -26,7 +26,8 @@ class ScreensTest {
         override val available = true
         override fun hasPermission() = true
         override fun requestPermission() {}
-        override fun start(lang: String, onInterim: (String) -> Unit, onDone: (String?, Int?) -> Unit) { onInterim("Room 203, two soap and one shampoo") }
+        override fun start(lang: String, record: Boolean, onInterim: (String) -> Unit, onDone: (String?, Int?) -> Unit) { onInterim("Room 203, two soap and one shampoo") }
+        override fun takeRecording(): ByteArray? = null
         override fun release() {}
         override fun cancel() {}
         override fun say(text: String, lang: String) {}

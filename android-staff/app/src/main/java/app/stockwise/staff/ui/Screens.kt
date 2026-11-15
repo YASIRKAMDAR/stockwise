@@ -39,7 +39,10 @@ interface Mic {
     val available: Boolean
     fun hasPermission(): Boolean
     fun requestPermission()
-    fun start(lang: String, onInterim: (String) -> Unit, onDone: (String?, Int?) -> Unit)
+    /** record = keep the recording for Google's model instead of the phone's own recognizer. */
+    fun start(lang: String, record: Boolean, onInterim: (String) -> Unit, onDone: (String?, Int?) -> Unit)
+    /** The last recording (m4a), once; null when cancelled or not recording. */
+    fun takeRecording(): ByteArray?
     fun release()
     fun cancel()
     fun say(text: String, lang: String)
@@ -154,23 +157,27 @@ fun VoiceBar(s: AppState, mic: Mic) {
     var interim by remember { mutableStateOf("") }
     Composer(
         placeholder = t.typeHere, slideText = t.slideToCancel, releaseCancelText = t.releaseToCancel,
-        live = live, startedAt = startedAt, interim = interim, busy = s.busy, micAvailable = mic.available,
+        live = live, startedAt = startedAt, interim = interim, busy = s.busy, micAvailable = s.cloudVoice || mic.available,
         onText = { s.interpret(it, 0) },
         onStart = {
             if (!mic.hasPermission()) { mic.requestPermission(); return@Composer }
             s.notice = null; s.answer = null; interim = ""; startedAt = System.currentTimeMillis(); live = true
-            mic.start(s.lang, { interim = it }) { text, err ->
+            val cloud = s.cloudVoice
+            mic.start(s.lang, cloud, { interim = it }) { text, err ->
                 live = false
+                val ms = System.currentTimeMillis() - startedAt
+                val audio = if (cloud) mic.takeRecording() else null
                 when {
+                    audio != null && audio.size > 2000 && ms >= 600 -> s.interpretAudio(audio, ms)
                     text == null && err == null -> {}                                   // cancelled
-                    !text.isNullOrBlank() -> s.interpret(text, System.currentTimeMillis() - startedAt)
+                    !text.isNullOrBlank() -> s.interpret(text, ms)
                     else -> s.missed()
                 }
             }
         },
         onSend = { mic.release() },
         onCancel = { if (live) { mic.cancel(); live = false } },
-        onTap = { s.notice = Notice(if (!mic.available) t.noVoice else if (!mic.hasPermission()) t.micDenied else t.holdHint) },
+        onTap = { s.notice = Notice(if (!(s.cloudVoice || mic.available)) t.noVoice else if (!mic.hasPermission()) t.micDenied else t.holdHint) },
     )
 }
 

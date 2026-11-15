@@ -24,6 +24,7 @@ struct QueryRow: Codable { let productId: String; let name: String; var store: I
 struct Proposal: Codable {
     let proposalId: String; let status: String; let action: String
     var transcript: String?; var lines: [ProposalLine]?; var queryResult: [QueryRow]?
+    var detectedLanguage: String?
 }
 struct EventLine: Codable { var name: String?; var quantity: Int?; var roomNumber: String? }
 struct ActivityEvent: Codable, Identifiable {

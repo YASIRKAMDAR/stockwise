@@ -133,7 +133,10 @@ private fun CheckStep(s: AppState, f: Flow, mic: Mic) {
     val sentence = s.summary(f)
     var hearing by remember { mutableStateOf(false) }
     LaunchedEffect(f.proposalId) {
-        if (fromVoice && !blocked) mic.say(sentence + ". " + f.lines.joinToString(", ") { l -> "${l.quantity} ${s.product(l.productId)?.let { it.native(s.lang) ?: it.name } ?: ""}" }, s.lang)
+        // Read aloud in the language the staff member spoke, when Google's model detected one.
+        val rl = s.replyLang ?: s.lang
+        val said = T(rl).summary(f.kind, f.lines.sumOf { it.quantity }, f.lines.firstOrNull { it.roomNumber != null }?.roomNumber)
+        if (fromVoice && !blocked) mic.say(said + ". " + f.lines.joinToString(", ") { l -> "${l.quantity} ${s.product(l.productId)?.let { it.native(rl) ?: it.name } ?: ""}" }, rl)
     }
     val room = f.lines.firstOrNull { it.roomNumber != null }?.roomNumber
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -159,7 +162,7 @@ private fun CheckStep(s: AppState, f: Flow, mic: Mic) {
                 .holdToTalk(onStart = {
                     if (!mic.hasPermission()) { mic.requestPermission(); return@holdToTalk }
                     hearing = true
-                    mic.start(s.lang, {}) { text, _ -> hearing = false
+                    mic.start(s.lang, false, {}) { text, _ -> hearing = false
                         when (text?.let { yesNo(it) }) { true -> { s.confirm() }; false -> { s.flow = null }; null -> {} } }
                 }, onSend = { mic.release() }, onCancel = { mic.cancel(); hearing = false }, onTap = { s.notice = Notice(t.holdHint) }),
                 contentAlignment = Alignment.Center) { Icon(Icons.Filled.Mic, t.holdYesNo, tint = if (hearing) Color.White else C.Ink) }

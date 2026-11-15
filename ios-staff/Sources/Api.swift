@@ -69,8 +69,15 @@ final class Api {
         try decoder.decode(TxResult.self, from: try await raw("POST", "/transactions", body: body, idem: key))
     }
 
-    /// Speech is turned into text on the phone; the server reads it the same way as typed text.
+    /// Text typed (or heard by the phone) — the server reads it the same way as speech.
     func interpret(hotelId: String, text: String, lang: String, durationMs: Int) async throws -> Proposal {
+        try await upload(hotelId: hotelId, lang: lang, durationMs: durationMs, file: ("speech.txt", "text/plain", Data(text.utf8)))
+    }
+    /// The recording itself, so Google's model can hear Gujarati, Hindi and English mixed in one sentence.
+    func interpretAudio(hotelId: String, audio: Data, lang: String, durationMs: Int) async throws -> Proposal {
+        try await upload(hotelId: hotelId, lang: lang, durationMs: durationMs, file: ("speech.m4a", "audio/mp4", audio))
+    }
+    private func upload(hotelId: String, lang: String, durationMs: Int, file: (name: String, type: String, data: Data)) async throws -> Proposal {
         let boundary = "sw-\(UUID().uuidString)"
         var d = Data()
         func field(_ name: String, _ value: String) {
@@ -79,8 +86,8 @@ final class Api {
         field("hotelId", hotelId)
         field("preferredLanguage", localeTag(lang))
         field("durationMs", String(max(0, durationMs)))
-        d.append(Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"speech.txt\"\r\nContent-Type: text/plain\r\n\r\n".utf8))
-        d.append(Data(text.utf8))
+        d.append(Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"\(file.name)\"\r\nContent-Type: \(file.type)\r\n\r\n".utf8))
+        d.append(file.data)
         d.append(Data("\r\n--\(boundary)--\r\n".utf8))
         let out = try await raw("POST", "/voice/interpret", body: d, contentType: "multipart/form-data; boundary=\(boundary)")
         return try decoder.decode(Proposal.self, from: out)

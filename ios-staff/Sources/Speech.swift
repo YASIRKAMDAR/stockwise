@@ -6,15 +6,25 @@ import Speech
 protocol Mic: AnyObject {
     func available(lang: String) -> Bool
     func hasPermission() -> Bool
+    func hasRecordPermission() -> Bool
     func requestPermission(_ done: @escaping (Bool) -> Void)
-    /// onDone: nil = cancelled, "" = nothing heard, otherwise the words. Always called on the main thread.
-    func start(lang: String, onInterim: @escaping (String) -> Void, onDone: @escaping (String?) -> Void)
-    func stopTalking()
+    /// record: also keep the recording (for Google's model). onDone: nil = cancelled, "" = no words heard,
+    /// otherwise the words the phone heard. Always called on the main thread.
+    func start(lang: String, record: Bool, onInterim: @escaping (String) -> Void, onDone: @escaping (String?) -> Void)
+    func release()
     func cancel()
+    /// The last recording (m4a), once; nil when cancelled or not recording.
+    func takeRecording() -> Data?
     func say(_ text: String, lang: String)
 }
+extension Mic {
+    func start(lang: String, onInterim: @escaping (String) -> Void, onDone: @escaping (String?) -> Void) {
+        start(lang: lang, record: false, onInterim: onInterim, onDone: onDone)
+    }
+}
 
-/// Hold-to-talk with Apple's speech recognizer: listens for as long as the mic is held.
+/// Hold-to-talk: Apple's recognizer shows the words live; when recording, the audio is also saved so
+/// Google's model can understand mixed Gujarati, Hindi and English.
 final class SpeechMic: NSObject, Mic {
     private let engine = AVAudioEngine()
     private var request: SFSpeechAudioBufferRecognitionRequest?
@@ -23,6 +33,10 @@ final class SpeechMic: NSObject, Mic {
     private var latest = ""
     private var cancelled = false
     private var finished = true
+    private var recording = false
+    private var file: AVAudioFile?
+    private var fileURL: URL?
+    private var recorded: Data?
     private var generation = 0
     private let synth = AVSpeechSynthesizer()
 
@@ -30,17 +44,18 @@ final class SpeechMic: NSObject, Mic {
         SFSpeechRecognizer(locale: Locale(identifier: localeTag(lang)))?.isAvailable ?? false
     }
     func hasPermission() -> Bool {
-        SFSpeechRecognizer.authorizationStatus() == .authorized && AVAudioSession.sharedInstance().recordPermission == .granted
+        SFSpeechRecognizer.authorizationStatus() == .authorized && hasRecordPermission()
     }
+    func hasRecordPermission() -> Bool { AVAudioSession.sharedInstance().recordPermission == .granted }
     func requestPermission(_ done: @escaping (Bool) -> Void) {
         SFSpeechRecognizer.requestAuthorization { status in
             AVAudioSession.sharedInstance().requestRecordPermission { granted in
-                DispatchQueue.main.async { done(status == .authorized && granted) }
+                DispatchQueue.main.async { done(granted) }
             }
         }
     }
 
-    func start(lang: String, onInterim: @escaping (String) -> Void, onDone: @escaping (String?) -> Void) {
+    func start(lang: String, record: Bool, onInterim: @escaping (String) -> Void, onDone: @escaping (String?) -> Void) {
         stopAudio()
         task?.cancel(); task = nil
         synth.stopSpeaking(at: .immediate)
@@ -48,9 +63,12 @@ final class SpeechMic: NSObject, Mic {
         let gen = generation
         self.onDone = onDone
         latest = ""; cancelled = false; finished = false
-        guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: localeTag(lang))), recognizer.isAvailable else { finish(gen); return }
-        let req = SFSpeechAudioBufferRecognitionRequest()
-        req.shouldReportPartialResults = true
+        recording = record; recorded = nil; file = nil; fileURL = nil
+        let recognizer = SFSpeechRecognizer(locale: Locale(identifier: localeTag(lang)))
+        let canRecognize = (recognizer?.isAvailable ?? false) && SFSpeechRecognizer.authorizationStatus() == .authorized
+        if !canRecognize && !record { finish(gen); return }
+        let req: SFSpeechAudioBufferRecognitionRequest? = canRecognize ? SFSpeechAudioBufferRecognitionRequest() : nil
+        req?.shouldReportPartialResults = true
         request = req
         do {
             let audio = AVAudioSession.sharedInstance()
@@ -59,30 +77,46 @@ final class SpeechMic: NSObject, Mic {
             let input = engine.inputNode
             let format = input.outputFormat(forBus: 0)
             if format.sampleRate == 0 || format.channelCount == 0 { finish(gen); return }
+            var out: AVAudioFile? = nil
+            if record {
+                let url = FileManager.default.temporaryDirectory.appendingPathComponent("stockwise-voice.m4a")
+                try? FileManager.default.removeItem(at: url)
+                let settings: [String: Any] = [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: format.sampleRate,
+                                               AVNumberOfChannelsKey: format.channelCount, AVEncoderBitRateKey: 48000]
+                out = try? AVAudioFile(forWriting: url, settings: settings, commonFormat: format.commonFormat, interleaved: format.isInterleaved)
+                file = out; fileURL = url
+            }
             input.removeTap(onBus: 0)
-            input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in req.append(buffer) }
+            input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+                req?.append(buffer)
+                try? out?.write(from: buffer)
+            }
             engine.prepare()
             try engine.start()
         } catch { finish(gen); return }
-        task = recognizer.recognitionTask(with: req) { [weak self] result, error in
-            let text = result?.bestTranscription.formattedString
-            let isFinal = result?.isFinal ?? false
-            let failed = error != nil
-            DispatchQueue.main.async {
-                guard let self = self, self.generation == gen, !self.finished else { return }
-                if let text = text { self.latest = text; onInterim(text) }
-                if isFinal || failed { self.finish(gen) }
+        if let recognizer = recognizer, let req = req {
+            task = recognizer.recognitionTask(with: req) { [weak self] result, error in
+                let text = result?.bestTranscription.formattedString
+                let isFinal = result?.isFinal ?? false
+                let failed = error != nil
+                DispatchQueue.main.async {
+                    guard let self = self, self.generation == gen, !self.finished else { return }
+                    if let text = text { self.latest = text; onInterim(text) }
+                    // While recording for Google, keep going until the mic is released.
+                    if (isFinal || failed) && !self.recording { self.finish(gen) }
+                }
             }
         }
     }
 
     /// Mic released: stop listening and hand over what was heard.
-    func stopTalking() {
+    func release() {
         guard !finished else { return }
         let gen = generation
         stopAudio()
         request?.endAudio()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.finish(gen) }
+        if task == nil { finish(gen); return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + (recording ? 0.6 : 1.5)) { [weak self] in self?.finish(gen) }
     }
 
     func cancel() {
@@ -92,11 +126,21 @@ final class SpeechMic: NSObject, Mic {
         finish(generation)
     }
 
+    func takeRecording() -> Data? {
+        defer { recorded = nil }
+        return recorded
+    }
+
     private func finish(_ gen: Int) {
         guard gen == generation, !finished else { return }
         finished = true
         stopAudio()
+        if recording { task?.cancel() }
         task = nil; request = nil
+        file = nil   // closes the recording
+        if recording, !cancelled, let url = fileURL { recorded = try? Data(contentsOf: url) }
+        if let url = fileURL { try? FileManager.default.removeItem(at: url) }
+        fileURL = nil
         let done = onDone
         onDone = nil
         done?(cancelled ? nil : latest.trimmingCharacters(in: .whitespacesAndNewlines))

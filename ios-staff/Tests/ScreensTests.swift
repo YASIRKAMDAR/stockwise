@@ -7,7 +7,9 @@ final class FakeMic: Mic {
     func available(lang: String) -> Bool { true }
     func hasPermission() -> Bool { true }
     func requestPermission(_ done: @escaping (Bool) -> Void) { done(true) }
-    func start(lang: String, onInterim: @escaping (String) -> Void, onDone: @escaping (String?) -> Void) {}
+    func hasRecordPermission() -> Bool { true }
+    func start(lang: String, record: Bool, onInterim: @escaping (String) -> Void, onDone: @escaping (String?) -> Void) {}
+    func takeRecording() -> Data? { nil }
     func stopTalking() {}
     func cancel() {}
     func say(_ text: String, lang: String) {}

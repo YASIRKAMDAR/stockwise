@@ -64,13 +64,20 @@ class Api(private val store: Store, private val base: String = BuildConfig.API_B
         post("/auth/staff-login", json.encodeToString(Login.serializer(), Login(code.trim().uppercase(), pin = pin)))
     }
 
-    /** Speech is turned into text on the phone; the server reads it the same way as typed text. */
-    suspend fun interpret(hotelId: String, text: String, lang: String, durationMs: Long): Proposal {
+    /** Typed text (or words heard by the phone); the server reads it the same way as speech. */
+    suspend fun interpret(hotelId: String, text: String, lang: String, durationMs: Long): Proposal =
+        upload(hotelId, lang, durationMs, "speech.txt", text.toRequestBody("text/plain".toMediaType()))
+
+    /** The recording itself, so Google's model can hear Gujarati, Hindi and English mixed in one sentence. */
+    suspend fun interpretAudio(hotelId: String, audio: ByteArray, lang: String, durationMs: Long): Proposal =
+        upload(hotelId, lang, durationMs, "speech.m4a", audio.toRequestBody("audio/mp4".toMediaType()))
+
+    private suspend fun upload(hotelId: String, lang: String, durationMs: Long, name: String, file: RequestBody): Proposal {
         val body = MultipartBody.Builder().setType(MultipartBody.FORM)
             .addFormDataPart("hotelId", hotelId)
             .addFormDataPart("preferredLanguage", when (lang) { "hi" -> "hi-IN"; "gu" -> "gu-IN"; else -> "en-IN" })
             .addFormDataPart("durationMs", durationMs.coerceAtLeast(0).toString())
-            .addFormDataPart("audio", "speech.txt", text.toRequestBody("text/plain".toMediaType()))
+            .addFormDataPart("audio", name, file)
             .build()
         return json.decodeFromString(Proposal.serializer(), raw("POST", "/voice/interpret", body))
     }

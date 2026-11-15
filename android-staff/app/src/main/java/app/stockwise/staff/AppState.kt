@@ -109,18 +109,40 @@ class AppState(ctx: Context) {
     }
 
     /** Text from the mic or the text box → the server works out the job → check screen. */
+    /** With Google's model on the server, the recording itself is sent, so mixed languages are understood. */
+    val cloudVoice get() = me?.config?.voiceProvider == "gemini"
+    /** The language the staff member actually spoke (when it was one language): replies are read aloud in it. */
+    var replyLang by mutableStateOf<String?>(null)
+
+    private fun applyCommand(c: LocalCommand) {
+        misses = 0
+        when (c) {
+            is LocalCommand.Go -> { flow = null; tab = c.tab; if (c.tab == Tab.HISTORY) loadHistory(); if (c.tab == Tab.BAG) refresh() }
+            is LocalCommand.Language -> setLanguage(c.lang)
+            LocalCommand.SignOut -> signOut()
+        }
+    }
+
     fun interpret(text: String, durationMs: Long) = scope.launch {
         val h = hotelId ?: return@launch
         notice = null; answer = null
-        when (val c = localCommand(text)) {
-            is LocalCommand.Go -> { misses = 0; flow = null; tab = c.tab; if (c.tab == Tab.HISTORY) loadHistory(); if (c.tab == Tab.BAG) refresh(); return@launch }
-            is LocalCommand.Language -> { misses = 0; setLanguage(c.lang); return@launch }
-            LocalCommand.SignOut -> { signOut(); return@launch }
-            null -> {}
-        }
+        localCommand(text)?.let { applyCommand(it); return@launch }
+        run { api.interpret(h, text, lang, durationMs) }
+    }
+
+    /** A recording: Google's model hears it, whatever mix of languages was spoken. */
+    fun interpretAudio(audio: ByteArray, durationMs: Long) = scope.launch {
+        val h = hotelId ?: return@launch
+        notice = null; answer = null
+        run(fromRecording = true) { api.interpretAudio(h, audio, lang, durationMs) }
+    }
+
+    private suspend fun run(fromRecording: Boolean = false, call: suspend () -> Proposal) {
         busy = true
         try {
-            val p = api.interpret(h, text, lang, durationMs)
+            val p = call()
+            if (fromRecording) localCommand(p.transcript)?.let { applyCommand(it); busy = false; return }
+            replyLang = when (p.detectedLanguage) { "gu-IN" -> "gu"; "hi-IN" -> "hi"; "en-IN" -> "en"; else -> null }
             val kind = Kind.of(p.action)
             when {
                 p.status == "QUERY_RESULT" -> { answer = p.queryResult ?: emptyList(); misses = 0 }

@@ -150,9 +150,13 @@ final class AppState: ObservableObject {
     }
 
     // ---------- voice bar ----------
+    /// With Google's model on the server, the recording itself is sent, so mixed languages are understood.
+    var useCloudVoice: Bool { me?.config?.voiceProvider == "gemini" }
+
     func voiceStart() {
-        guard mic.available(lang: lang) else { return }
-        guard mic.hasPermission() else {
+        let cloud = useCloudVoice
+        guard cloud || mic.available(lang: lang) else { return }
+        guard cloud ? mic.hasRecordPermission() : mic.hasPermission() else {
             mic.requestPermission { [weak self] ok in
                 guard let self = self else { return }
                 self.notice = Notice(text: ok ? self.t.holdHint : self.t.micDenied)
@@ -161,18 +165,24 @@ final class AppState: ObservableObject {
         }
         notice = nil; answer = nil; voiceInterim = ""; voiceStartedAt = Date(); voiceLive = true
         let started = voiceStartedAt
-        mic.start(lang: lang, onInterim: { [weak self] text in self?.voiceInterim = text }, onDone: { [weak self] text in
+        mic.start(lang: lang, record: cloud, onInterim: { [weak self] text in self?.voiceInterim = text }, onDone: { [weak self] text in
             guard let self = self else { return }
             self.voiceLive = false
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            if cloud, let audio = self.mic.takeRecording(), audio.count > 2000, ms >= 600 {
+                self.interpretAudio(audio, heard: text ?? "", durationMs: ms)
+                return
+            }
             guard let text = text else { return }          // cancelled
-            if text.isEmpty { self.missed() } else { self.interpret(text, durationMs: Int(Date().timeIntervalSince(started) * 1000)) }
+            if text.isEmpty { self.missed() } else { self.interpret(text, durationMs: ms) }
         })
     }
-    func voiceSend() { if voiceLive { mic.stopTalking() } }
+    func voiceSend() { if voiceLive { mic.release() } }
     func voiceCancel() { if voiceLive { mic.cancel() } }
     func voiceHint() {
-        notice = Notice(text: !mic.available(lang: lang) ? t.noVoiceLang : !mic.hasPermission() ? t.micDenied : t.holdHint)
-        if !mic.available(lang: lang) { nudgeTap = true }
+        let usable = useCloudVoice || mic.available(lang: lang)
+        notice = Notice(text: !usable ? t.noVoiceLang : !(useCloudVoice ? mic.hasRecordPermission() : mic.hasPermission()) ? t.micDenied : t.holdHint)
+        if !usable { nudgeTap = true }
     }
 
     // ---------- conversation ----------
@@ -185,75 +195,115 @@ final class AppState: ObservableObject {
     private var pendingProposalId: UUID? {
         chat.last { m in if case .proposal(_, .ready) = m.body { return true }; return false }?.id
     }
-    private func say(_ text: String) { if !text.isEmpty { mic.say(text, lang: lang) } }
+    private func say(_ text: String, _ l: String? = nil) { if !text.isEmpty { mic.say(text, lang: l ?? lang) } }
 
-    /// Text from the mic or the text box appears as the staff member's message; the app answers below it.
+    /// Typed text (or words heard by the phone) appears as the staff member's message; the app answers below it.
     func interpret(_ text: String, durationMs: Int) {
         guard let h = hotelId else { return }
         notice = nil; answer = nil
         post(.said(text, spoken: durationMs > 0), as: .me)
-        // A short "yes" / "no" answers the last question in the conversation.
-        if let pid = pendingProposalId, text.split(separator: " ").count <= 3, let yes = yesNo(text) {
-            if yes { confirmChat(pid) } else { cancelChat(pid) }
-            return
-        }
-        if let c = localCommand(text) {
-            misses = 0
-            switch c {
-            case .go(.bag):
-                let lines = activeProducts.compactMap { p -> BagLine? in
-                    guard let q = bag[p.id], q > 0 else { return nil }
-                    return BagLine(name: p.name, native: p.native(lang), emoji: p.emoji, qty: q)
-                }
-                post(.bag(lines))
-                say(lines.isEmpty ? t.nothingInBag : lines.map { "\($0.native ?? $0.name) \($0.qty)" }.joined(separator: ", "))
-            case .go(.history):
-                post(.text(t.openingHistory, warn: false)); go(.history)
-            case .go(.home):
-                break
-            case .language(let l):
-                setLanguage(l); post(.text(t.languageChanged, warn: false)); say(t.languageChanged)
-            case .signOut:
-                signOut()
-            }
-            return
-        }
+        if handleShort(text) { return }
         busy = true
+        let l = lang
         Task {
-            do {
-                let p = try await api.interpret(hotelId: h, text: text, lang: lang, durationMs: durationMs)
-                let kind = Kind(rawValue: p.action)
-                let plines = p.lines ?? []
-                if p.status == "QUERY_RESULT" {
-                    misses = 0
-                    let rows = p.queryResult ?? []
-                    post(.stock(rows))
-                    say(rows.prefix(4).map { "\($0.name) \($0.store ?? 0)" }.joined(separator: ", "))
-                } else if let kind = kind, !plines.isEmpty {
-                    misses = 0
-                    let place = kind == .placeInRoom
-                    let lines: [Line] = plines.map { l in
-                        let q = max(1, l.quantity ?? 1)
-                        var src: String? = nil
-                        if place { src = l.source ?? l.productId.map { self.defaultSource($0, q) } }
-                        return Line(productId: l.productId, quantity: q, roomId: l.roomId, roomNumber: l.roomNumber, source: src, spoken: l.spokenProduct ?? "", issues: l.issues ?? [])
-                    }
-                    let room = lines.first { $0.roomId != nil }
-                    let f = Flow(kind: kind, step: .check, roomId: room?.roomId, roomNumber: room?.roomNumber, lines: lines, proposalId: p.proposalId, transcript: p.transcript)
-                    post(.proposal(f, .ready))
-                    say(spokenSummary(f))
-                } else if let kind = kind {
-                    // "Take from store" with no items: open that job so they can pick the items.
-                    misses = 0
-                    post(.text("\(t.act(kind).0) — \(t.pickItems)", warn: false))
-                    say(t.act(kind).0)
-                    start(kind)
-                } else { missed() }
-            } catch let e as ApiError {
-                if e.status == 401 { api.clearSession(); me = nil } else { post(.text(e.message, warn: true)) }
-            } catch { post(.text(t.offlineLogin, warn: true)) }
+            await run { try await self.api.interpret(hotelId: h, text: text, lang: l, durationMs: durationMs) }
             busy = false
         }
+    }
+
+    /// A recording: Google's model hears it, and its transcript replaces what the phone guessed.
+    func interpretAudio(_ audio: Data, heard: String, durationMs: Int) {
+        guard let h = hotelId else { return }
+        notice = nil; answer = nil
+        let bubble = ChatMessage(role: .me, body: .said(heard.isEmpty ? "…" : heard, spoken: true))
+        chat.append(bubble)
+        busy = true
+        let l = lang
+        Task {
+            await run(bubble: bubble.id, fallbackText: heard) { try await self.api.interpretAudio(hotelId: h, audio: audio, lang: l, durationMs: durationMs) }
+            busy = false
+        }
+    }
+
+    /// "Yes" / "no" for the last card, and commands the app handles itself. True when handled.
+    private func handleShort(_ text: String) -> Bool {
+        if let pid = pendingProposalId, text.split(separator: " ").count <= 3, let yes = yesNo(text) {
+            if yes { confirmChat(pid) } else { cancelChat(pid) }
+            return true
+        }
+        guard let c = localCommand(text) else { return false }
+        misses = 0
+        switch c {
+        case .go(.bag):
+            let lines = activeProducts.compactMap { p -> BagLine? in
+                guard let q = bag[p.id], q > 0 else { return nil }
+                return BagLine(name: p.name, native: p.native(lang), emoji: p.emoji, qty: q)
+            }
+            post(.bag(lines))
+            say(lines.isEmpty ? t.nothingInBag : lines.map { "\($0.native ?? $0.name) \($0.qty)" }.joined(separator: ", "))
+        case .go(.history):
+            post(.text(t.openingHistory, warn: false)); go(.history)
+        case .go(.home):
+            break
+        case .language(let l):
+            setLanguage(l); post(.text(t.languageChanged, warn: false)); say(t.languageChanged)
+        case .signOut:
+            signOut()
+        }
+        return true
+    }
+
+    private func run(bubble: UUID? = nil, fallbackText: String = "", _ call: () async throws -> Proposal) async {
+        do {
+            let p = try await call()
+            if let b = bubble, let i = index(b), let tr = p.transcript, !tr.isEmpty { chat[i].body = .said(tr, spoken: true) }
+            if bubble != nil, handleShort(p.transcript ?? "") { return }
+            handle(p)
+        } catch let e as ApiError {
+            if e.status == 401 { api.clearSession(); me = nil; return }
+            // Google's model unavailable: fall back to the words the phone heard.
+            if e.status >= 500, bubble != nil, !fallbackText.isEmpty, let h = hotelId,
+               let p = try? await api.interpret(hotelId: h, text: fallbackText, lang: lang, durationMs: 0) {
+                handle(p); return
+            }
+            post(.text(e.message, warn: true))
+        } catch { post(.text(t.offlineLogin, warn: true)) }
+    }
+
+    /// The language the staff member actually spoke, when it was one language.
+    private func spokenLang(_ detected: String?) -> String? {
+        switch detected { case "gu-IN": return "gu"; case "hi-IN": return "hi"; case "en-IN": return "en"; default: return nil }
+    }
+
+    private func handle(_ p: Proposal) {
+        let rl = spokenLang(p.detectedLanguage) ?? lang
+        let kind = Kind(rawValue: p.action)
+        let plines = p.lines ?? []
+        if p.status == "QUERY_RESULT" {
+            misses = 0
+            let rows = p.queryResult ?? []
+            post(.stock(rows))
+            say(rows.prefix(4).map { "\($0.name) \($0.store ?? 0)" }.joined(separator: ", "), rl)
+        } else if let kind = kind, !plines.isEmpty {
+            misses = 0
+            let place = kind == .placeInRoom
+            let lines: [Line] = plines.map { l in
+                let q = max(1, l.quantity ?? 1)
+                var src: String? = nil
+                if place { src = l.source ?? l.productId.map { self.defaultSource($0, q) } }
+                return Line(productId: l.productId, quantity: q, roomId: l.roomId, roomNumber: l.roomNumber, source: src, spoken: l.spokenProduct ?? "", issues: l.issues ?? [])
+            }
+            let room = lines.first { $0.roomId != nil }
+            let f = Flow(kind: kind, step: .check, roomId: room?.roomId, roomNumber: room?.roomNumber, lines: lines, proposalId: p.proposalId, transcript: p.transcript)
+            post(.proposal(f, .ready))
+            say(spokenSummary(f, lang: rl), rl)
+        } else if let kind = kind {
+            // "Take from store" with no items: open that job so they can pick the items.
+            misses = 0
+            post(.text("\(t.act(kind).0) — \(t.pickItems)", warn: false))
+            say(T(lang: rl).act(kind).0, rl)
+            start(kind)
+        } else { missed() }
     }
     func missed() {
         misses += 1; nudgeTap = true
@@ -301,12 +351,14 @@ final class AppState: ObservableObject {
     func summary(_ f: Flow) -> String {
         t.summary(f.kind, f.lines.reduce(0) { $0 + $1.quantity }, f.lines.first { $0.roomNumber != nil }?.roomNumber)
     }
-    func spokenSummary(_ f: Flow) -> String {
-        let items = f.lines.map { l -> String in
-            let p = product(l.productId)
-            return "\(l.quantity) \(p?.native(lang) ?? p?.name ?? "")"
+    func spokenSummary(_ f: Flow, lang l: String? = nil) -> String {
+        let sl = l ?? lang
+        let items = f.lines.map { line -> String in
+            let p = product(line.productId)
+            return "\(line.quantity) \(p?.native(sl) ?? p?.name ?? "")"
         }.joined(separator: ", ")
-        return summary(f) + ". " + items
+        let sentence = T(lang: sl).summary(f.kind, f.lines.reduce(0) { $0 + $1.quantity }, f.lines.first { $0.roomNumber != nil }?.roomNumber)
+        return sentence + ". " + items
     }
 
     /// Hold the small mic on the check screen and say yes / no.
