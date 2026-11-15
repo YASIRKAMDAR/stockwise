@@ -11,7 +11,7 @@ protocol Mic: AnyObject {
     /// record: also keep the recording (for Google's model). onDone: nil = cancelled, "" = no words heard,
     /// otherwise the words the phone heard. Always called on the main thread.
     func start(lang: String, record: Bool, onInterim: @escaping (String) -> Void, onDone: @escaping (String?) -> Void)
-    func release()
+    func stopTalking()
     func cancel()
     /// The last recording (m4a), once; nil when cancelled or not recording.
     func takeRecording() -> Data?
@@ -110,7 +110,7 @@ final class SpeechMic: NSObject, Mic {
     }
 
     /// Mic released: stop listening and hand over what was heard.
-    func release() {
+    func stopTalking() {
         guard !finished else { return }
         let gen = generation
         stopAudio()

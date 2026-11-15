@@ -177,7 +177,7 @@ final class AppState: ObservableObject {
             if text.isEmpty { self.missed() } else { self.interpret(text, durationMs: ms) }
         })
     }
-    func voiceSend() { if voiceLive { mic.release() } }
+    func voiceSend() { if voiceLive { mic.stopTalking() } }
     func voiceCancel() { if voiceLive { mic.cancel() } }
     func voiceHint() {
         let usable = useCloudVoice || mic.available(lang: lang)
