@@ -1,6 +1,9 @@
 package app.stockwise.manager
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -108,9 +111,9 @@ class EndToEndTest {
 
     private fun signIn(s: AppState) {
         rule.setContent { ManagerApp(s, mic) }
-        rule.onNodeWithText("Employee code").performTextInput("M1")
-        rule.onNodeWithText("Password").performTextInput("secret-pass")
-        rule.onNodeWithText("Sign in").performClick()
+        rule.onAllNodes(hasSetTextAction())[0].performTextInput("M1")
+        rule.onAllNodes(hasSetTextAction())[1].performTextInput("secret-pass")
+        rule.onNode(hasText("Sign in") and hasClickAction()).performClick()
         waitFor(s, "s.me != null && s.stock.isNotEmpty()", 10_000) { s.me != null && s.stock.isNotEmpty() }
         rule.waitForIdle()
     }

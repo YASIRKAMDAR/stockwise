@@ -2,6 +2,9 @@ package app.stockwise.staff
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.onAllNodes
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -96,9 +99,9 @@ class EndToEndTest {
         rule.setContent { StaffApp(s, mic) }
 
         // Sign in with code + passcode.
-        rule.onNodeWithText("Your code").performTextInput("S101")
-        rule.onNodeWithText("Passcode").performTextInput("1234")
-        rule.onNodeWithText("Sign in").performClick()
+        rule.onAllNodes(hasSetTextAction())[0].performTextInput("S101")
+        rule.onAllNodes(hasSetTextAction())[1].performTextInput("1234")
+        rule.onNode(hasText("Sign in") and hasClickAction()).performClick()
         waitFor(s, "s.me != null", 10_000) { s.me != null }
         waitFor(s, "s.products.isNotEmpty()", 10_000) { s.products.isNotEmpty() }
         rule.onNodeWithText("Hold to talk").assertIsDisplayed()
@@ -141,9 +144,9 @@ class EndToEndTest {
     @Test fun cancelOnCard_savesNothing() {
         val s = state()
         rule.setContent { StaffApp(s, mic) }
-        rule.onNodeWithText("Your code").performTextInput("S101")
-        rule.onNodeWithText("Passcode").performTextInput("1234")
-        rule.onNodeWithText("Sign in").performClick()
+        rule.onAllNodes(hasSetTextAction())[0].performTextInput("S101")
+        rule.onAllNodes(hasSetTextAction())[1].performTextInput("1234")
+        rule.onNode(hasText("Sign in") and hasClickAction()).performClick()
         waitFor(s, "s.products.isNotEmpty()", 10_000) { s.products.isNotEmpty() }
         rule.onNodeWithContentDescription("Type: room 203, 2 soap").performTextInput("room 203, 2 soap")
         rule.onNodeWithContentDescription("Send").performClick()
