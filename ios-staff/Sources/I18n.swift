@@ -90,7 +90,6 @@ struct T {
     var needsFix: String { s("Something needs choosing. Tap Edit.", "कुछ चुनना बाकी है। बदलें दबाएँ।", "કંઈક પસંદ કરવાનું બાકી છે. બદલો દબાવો.") }
     var languageChanged: String { s("Language changed to English", "भाषा हिन्दी हो गई", "ભાષા ગુજરાતી થઈ") }
     var openingHistory: String { s("Opening your history", "आपका इतिहास खोल रहे हैं", "તમારો ઇતિહાસ ખોલી રહ્યા છીએ") }
-    var newChat: String { s("Clear", "साफ़ करें", "સાફ કરો") }
     var pickItems: String { s("pick the items", "सामान चुनें", "વસ્તુ પસંદ કરો") }
     var noMatch: String { s("No matching stock.", "ऐसा कोई सामान नहीं मिला।", "આવો કોઈ સામાન મળ્યો નહીં.") }
     var inYourBag: String { s("In your bag", "आपके बैग में", "તમારી બેગમાં") }

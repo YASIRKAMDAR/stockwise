@@ -134,6 +134,7 @@ final class AppState: ObservableObject {
 
     func go(_ to: AppTab) {
         flow = nil; tab = to; menuOpen = false
+        if to == .home { clearChat() }   // Home is the dashboard, not the last conversation
         if to == .history { loadHistory() }
         if to == .bag { refresh() }
         if to == .attempts { loadAttempts() }
@@ -219,7 +220,9 @@ final class AppState: ObservableObject {
         chat.append(ChatMessage(role: role, body: body))
         if chat.count > 40 { chat.removeFirst(chat.count - 40) }
     }
-    func clearChat() { chat = []; notice = nil; editingChatId = nil }
+    func clearChat() { chat = []; notice = nil; editingChatId = nil; answer = nil }
+    /// The conversation is on screen in place of the dashboard.
+    var inChat: Bool { flow == nil && tab == .home && !chat.isEmpty }
     private func index(_ id: UUID) -> Int? { chat.firstIndex { $0.id == id } }
     private var pendingProposalId: UUID? {
         chat.last { m in if case .proposal(_, .ready) = m.body { return true }; return false }?.id
@@ -278,7 +281,9 @@ final class AppState: ObservableObject {
             else { say(lines.isEmpty ? t.nothingInBag : lines.map { "\($0.native ?? $0.name) \($0.qty)" }.joined(separator: ", ")) }
         case .go(.history):
             post(.text(t.openingHistory, warn: false)); go(.history)
-        case .go(.home), .go(.attempts):
+        case .go(.home):
+            go(.home)
+        case .go(.attempts):
             break
         case .language(let l):
             setLanguage(l); post(.text(t.languageChanged, warn: false)); say(t.languageChanged)

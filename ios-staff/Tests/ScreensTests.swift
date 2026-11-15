@@ -152,6 +152,15 @@ final class ScreensTests: XCTestCase {
         s.chat = [said("umm the thing"), ChatMessage(role: .app, body: .text(T(lang: "en").notUnderstood, warn: true))]
         try shot("16-chat-not-understood", s)
     }
+    func test22HomeLeavesChat() throws {
+        let s = state()
+        s.chat = [said("my bag", false), ChatMessage(role: .app, body: .bag([BagLine(name: "Soap", native: nil, emoji: "🧼", qty: 8)]))]
+        XCTAssertTrue(s.inChat)
+        try shot("22-chat-with-back", s)
+        s.go(.home)
+        XCTAssertTrue(s.chat.isEmpty); XCTAssertFalse(s.inChat); XCTAssertEqual(s.tab, .home)
+        try shot("23-back-on-dashboard", s)
+    }
     func test20Intro() throws { let s = state(); s.showIntro = true; try shot("20-intro", s) }
     func test21Attempts() throws {
         let s = state(); s.tab = .attempts

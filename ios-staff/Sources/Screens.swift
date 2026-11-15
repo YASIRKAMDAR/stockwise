@@ -74,12 +74,21 @@ struct Shell: View {
         ZStack(alignment: .leading) {
             VStack(spacing: 0) {
                 HStack(spacing: 12) {
-                    Button(action: { s.menuOpen = true }) {
-                        Image(systemName: "line.3.horizontal").font(.system(size: 20, weight: .semibold)).foregroundColor(C.ink)
-                            .frame(width: 46, height: 46)
-                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(C.line, lineWidth: 1.5))
+                    if s.inChat && !s.voiceLive && !s.busy {
+                        Button(action: { s.go(.home) }) {
+                            Image(systemName: "chevron.left").font(.system(size: 20, weight: .semibold)).foregroundColor(C.ink)
+                                .frame(width: 46, height: 46)
+                                .overlay(RoundedRectangle(cornerRadius: 12).stroke(C.line, lineWidth: 1.5))
+                        }
+                        .accessibilityLabel(s.t.home)
+                    } else {
+                        Button(action: { s.menuOpen = true }) {
+                            Image(systemName: "line.3.horizontal").font(.system(size: 20, weight: .semibold)).foregroundColor(C.ink)
+                                .frame(width: 46, height: 46)
+                                .overlay(RoundedRectangle(cornerRadius: 12).stroke(C.line, lineWidth: 1.5))
+                        }
+                        .accessibilityLabel("Menu")
                     }
-                    .accessibilityLabel("Menu")
                     VStack(alignment: .leading, spacing: 1) {
                         Text(title).font(.system(size: 17, weight: .semibold)).foregroundColor(C.ink).lineLimit(1)
                         Text("\(s.me?.displayName ?? "") · \(s.hotel?.name ?? "")").font(.system(size: 13)).foregroundColor(C.ink2).lineLimit(1)

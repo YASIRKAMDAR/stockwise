@@ -359,18 +359,18 @@ struct BagAnswer: View {
     }
 }
 
-/// Shortcuts under the conversation: start a job by tapping, or clear the conversation.
+/// Shortcuts under the conversation: back to the dashboard, or start a job by tapping.
 struct QuickActions: View {
     @EnvironmentObject var s: AppState
     var body: some View {
         let t = s.t
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
+                chip("🏠 " + t.home) { s.go(.home) }
                 chip("🚪 " + t.act(.placeInRoom).0) { s.start(.placeInRoom) }
                 chip("🛍️ " + t.act(.checkoutToStaff).0) { s.start(.checkoutToStaff) }
                 chip("↩️ " + t.act(.returnToStore).0) { s.start(.returnToStore) }
                 chip("📦 " + t.act(.supplierReceipt).0) { s.start(.supplierReceipt) }
-                chip("🧹 " + t.newChat) { s.clearChat() }
             }
             .padding(.horizontal, 12).padding(.top, 8)
         }
