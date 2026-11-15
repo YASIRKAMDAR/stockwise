@@ -24,8 +24,8 @@ const Env = z.object({
   VOICE_MAX_SECONDS: z.coerce.number().int().positive().default(25),
   VOICE_MAX_BYTES: z.coerce.number().int().positive().default(3_000_000),
   VOICE_DAILY_LIMIT_USD: z.coerce.number().nonnegative().default(3),
-  VOICE_PRICE_INPUT_PER_M_USD: z.coerce.number().nonnegative().default(0),
-  VOICE_PRICE_OUTPUT_PER_M_USD: z.coerce.number().nonnegative().default(0),
+  VOICE_PRICE_INPUT_PER_M_USD: z.coerce.number().nonnegative().default(0.3),
+  VOICE_PRICE_OUTPUT_PER_M_USD: z.coerce.number().nonnegative().default(2.5),
   VOICE_PROPOSAL_TTL_MINUTES: z.coerce.number().int().positive().default(10),
   VOICE_RETAIN_AUDIO: bool.default(false),
   OWNER_POLL_INTERVAL_SECONDS: z.coerce.number().int().positive().default(15),
@@ -40,6 +40,10 @@ export function loadConfig(overrides: Record<string, string | undefined> = {}): 
     throw new Error('Invalid environment: ' + parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '));
   }
   const cfg = parsed.data;
+  // Adding GEMINI_API_KEY is enough to switch on Google's model (unless voice is turned off).
+  if (cfg.GEMINI_API_KEY && cfg.VOICE_PROVIDER === 'fake' && cfg.NODE_ENV !== 'test') cfg.VOICE_PROVIDER = 'gemini';
+  // Gemini without a key would fail every request: keep the simple test parser instead of refusing to start.
+  if (cfg.VOICE_PROVIDER === 'gemini' && !cfg.GEMINI_API_KEY) cfg.VOICE_PROVIDER = cfg.NODE_ENV === 'production' ? 'fake' : cfg.VOICE_PROVIDER;
   if (cfg.VOICE_PROVIDER === 'gemini' && !cfg.GEMINI_API_KEY) {
     throw new Error('VOICE_PROVIDER=gemini requires GEMINI_API_KEY');
   }

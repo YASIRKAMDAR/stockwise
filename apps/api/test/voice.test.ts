@@ -227,3 +227,16 @@ describe('Test-mode parser: voice-first phrasing', async () => {
     expect(r.items[0]).toMatchObject({ quantity: 6, roomNumber: '115' });
   });
 });
+
+describe('Switching Google voice on', () => {
+  const base = { DATABASE_URL: 'postgres://unused', SESSION_SECRET: 'x'.repeat(40) };
+  it('adding GEMINI_API_KEY switches the demo parser to Gemini', () => {
+    expect(loadConfig({ ...base, NODE_ENV: 'production', VOICE_PROVIDER: 'fake', GEMINI_API_KEY: 'k' }).VOICE_PROVIDER).toBe('gemini');
+  });
+  it('Gemini without a key keeps the demo parser in production instead of failing to start', () => {
+    expect(loadConfig({ ...base, NODE_ENV: 'production', VOICE_PROVIDER: 'gemini', GEMINI_API_KEY: '' }).VOICE_PROVIDER).toBe('fake');
+  });
+  it('voice turned off stays off even with a key', () => {
+    expect(loadConfig({ ...base, NODE_ENV: 'production', VOICE_PROVIDER: 'disabled', GEMINI_API_KEY: 'k' }).VOICE_PROVIDER).toBe('disabled');
+  });
+});
