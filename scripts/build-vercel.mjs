@@ -37,6 +37,7 @@ writeFileSync(`${out}/config.json`, JSON.stringify({
         'permissions-policy': 'microphone=(self), camera=(), geolocation=()',
         'content-security-policy': "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; media-src 'self' blob:; frame-ancestors 'none'",
       }, continue: true },
+    { src: '^/android/?$', dest: '/android.html' },
     { handle: 'filesystem' },
     { src: '^/(.*)$', dest: '/index.html' },
   ],

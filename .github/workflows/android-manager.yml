@@ -56,6 +56,15 @@ jobs:
           f=$(ls android-manager/app/build/test-results/testDebugUnitTest/*.xml 2>/dev/null | head -1)
           [ -n "$f" ] && grep -A5 "<failure" android-manager/app/build/test-results/testDebugUnitTest/*.xml | head -60 || true
 
+      - name: Stable "latest" link for the install page
+        run: cp out/Stockwise-Manager-1.0.${{ github.run_number }}.apk "out-latest-Stockwise-Manager.apk" && mkdir -p latest && mv "out-latest-Stockwise-Manager.apk" "latest/Stockwise-Manager.apk"
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-manager-latest
+          name: Stockwise Manager (Android) — latest
+          make_latest: false
+          files: latest/Stockwise-Manager.apk
+          body: Always the newest build. Linked from /android on the website. Version 1.0.${{ github.run_number }}.
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:

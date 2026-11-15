@@ -105,6 +105,7 @@ export async function buildApp({ db, cfg, voice }: AppDeps) {
       try { return reply.type('application/json').send(await readFile(`${cfg.SERVE_WEB_DIR}/.well-known/assetlinks.json`, 'utf8')); }
       catch { return reply.code(404).send({ error: 'NOT_FOUND' }); }
     });
+    app.get('/android', async (_req, reply) => reply.sendFile('android.html'));
     // App shell and service worker must revalidate so deploys take effect; hashed assets can cache long.
     app.addHook('onSend', async (req, reply, payload) => {
       if (req.url.startsWith('/api/')) return payload;
