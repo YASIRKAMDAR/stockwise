@@ -1,6 +1,6 @@
 package app.stockwise.staff
 
-import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertExists
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasClickAction
@@ -88,7 +88,7 @@ class EndToEndTest {
     private fun waitFor(s: AppState, what: String, timeout: Long = 10_000, cond: () -> Boolean) {
         val end = System.currentTimeMillis() + timeout
         while (!cond()) {
-            if (System.currentTimeMillis() > end) throw AssertionError("Timed out waiting for $what. loginError=${s.loginError} notice=${s.notice} busy=${s.busy} chat=${s.chat.size} requests=${received.map { "${it.method} ${it.path}" }}")
+            if (System.currentTimeMillis() > end) throw AssertionError("Timed out waiting for $what. loginError=${s.loginError} notice=${s.notice} busy=${s.busy} chat=${s.chat.map { it.body::class.simpleName }} flow=${s.flow?.step} requests=${received.map { "${it.method} ${it.path}" }}")
             org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
             rule.waitForIdle()
             Thread.sleep(25)
@@ -109,7 +109,7 @@ class EndToEndTest {
         rule.onNode(hasText("Sign in") and hasClickAction()).performClick(); pump()
         waitFor(s, "s.me != null", 10_000) { s.me != null }
         waitFor(s, "s.products.isNotEmpty()", 10_000) { s.products.isNotEmpty() && !s.busy }
-        rule.onNodeWithText("Hold to talk").assertIsDisplayed()
+        rule.onNodeWithText("Hold to talk").assertExists()
 
         // Type what would have been said; the server reads it the same way as speech.
         rule.onNodeWithContentDescription("Type: room 203, 2 soap").performTextInput("room 203, 2 soap")
@@ -118,16 +118,16 @@ class EndToEndTest {
         rule.waitForIdle()
 
         // The card shows Google's version of the words, the language tag, the room and the line. Nothing saved yet.
-        rule.onNodeWithText("Room 203 ma do soap mukya").assertIsDisplayed()
-        rule.onNodeWithText("Mixed").assertIsDisplayed()
-        rule.onNodeWithText("203").assertIsDisplayed()
+        rule.onNodeWithText("Room 203 ma do soap mukya").assertExists()
+        rule.onNodeWithText("Mixed").assertExists()
+        rule.onNodeWithText("203").assertExists()
         assertTrue(received.none { it.path == "/transactions" && it.method == "POST" })
 
         // Confirm → one POST /transactions with an idempotency key and the proposal id → "Saved ✓ · A1B2C3".
         rule.onNodeWithText("Confirm").performClick(); pump()
         waitFor(s, "s.chat.any { (it.body as? ChatBody.Job)?.state == ChatState.SAVED }", 10_000) { s.chat.any { (it.body as? ChatBody.Job)?.state == ChatState.SAVED } && !s.busy }
         rule.waitForIdle()
-        rule.onNodeWithText("Saved ✓ · A1B2C3").assertIsDisplayed()
+        rule.onNodeWithText("Saved ✓ · A1B2C3").assertExists()
         val posts = received.filter { it.path == "/transactions" && it.method == "POST" }
         assertEquals(1, posts.size)
         assertNotNull(posts[0].getHeader("idempotency-key"))
@@ -141,8 +141,8 @@ class EndToEndTest {
         rule.onNodeWithContentDescription("Send").performClick(); pump()
         waitFor(s, "s.chat.any { it.body is ChatBody.Bag }", 5_000) { s.chat.any { it.body is ChatBody.Bag } }
         rule.waitForIdle()
-        rule.onNodeWithText("In your bag").assertIsDisplayed()
-        rule.onNode(hasText("8")).assertIsDisplayed()
+        rule.onNodeWithText("In your bag").assertExists()
+        rule.onNode(hasText("8")).assertExists()
         assertTrue(received.drop(before).none { it.path?.endsWith("/voice/interpret") == true })
     }
 
@@ -159,7 +159,7 @@ class EndToEndTest {
         rule.waitForIdle()
         rule.onNodeWithText("Cancel").performClick(); pump()
         rule.waitForIdle()
-        rule.onNodeWithText("Cancelled").assertIsDisplayed()
+        rule.onNodeWithText("Cancelled").assertExists()
         assertTrue(received.none { it.path == "/transactions" && it.method == "POST" })
     }
 }

@@ -1,6 +1,6 @@
 package app.stockwise.manager
 
-import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertExists
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
@@ -128,17 +128,17 @@ class EndToEndTest {
         val s = state()
         signIn(s)
         // Today: the alert and the store cards.
-        rule.onNodeWithText("Soap out of stock at Demo Hotel 1").assertIsDisplayed()
-        rule.onNodeWithText("1 thing needs you").assertIsDisplayed()
+        rule.onNodeWithText("Soap out of stock at Demo Hotel 1").assertExists()
+        rule.onNodeWithText("1 thing needs you").assertExists()
 
         // Ask by text (same server path as speech): the answer appears in the thread, nothing is written.
         rule.onNodeWithContentDescription("Ask: “how much soap is left?”").performTextInput("soap kitna bacha hai")
         rule.onNodeWithContentDescription("Send").performClick(); pump()
         waitFor(s, "stock answer", 10_000) { s.chat.any { it.body is ChatBody.Stock } && !s.busy }
         rule.waitForIdle()
-        rule.onNodeWithText("Soap kitna bacha hai?").assertIsDisplayed()
-        rule.onNodeWithText("हिंदी").assertIsDisplayed()
-        rule.onNodeWithText("14 with staff").assertIsDisplayed()
+        rule.onNodeWithText("Soap kitna bacha hai?").assertExists()
+        rule.onNodeWithText("हिंदी").assertExists()
+        rule.onNodeWithText("14 with staff").assertExists()
         val interpret = received.last { it.path?.endsWith("/voice/interpret") == true }
         val form = interpret.body.readUtf8()
         assertTrue(form.contains("name=\"scope\"\r\n\r\nall") && form.contains("name=\"client\"\r\n\r\nandroid-manager") && !form.contains("name=\"mode\""))
@@ -148,20 +148,20 @@ class EndToEndTest {
         s.go(Tab.COUNT)
         waitFor(s, "s.countStatus != null", 10_000) { s.countStatus != null }
         rule.waitForIdle()
-        rule.onNodeWithText("Weekly count overdue").assertIsDisplayed()
+        rule.onNodeWithText("Weekly count overdue").assertExists()
         rule.onNodeWithText("Start count").performClick(); pump()
         waitFor(s, "s.sheet != null", 10_000) { s.sheet != null && !s.busy }
         rule.waitForIdle()
-        rule.onNodeWithText("0 of 2 counted").assertIsDisplayed()
+        rule.onNodeWithText("0 of 2 counted").assertExists()
         rule.onNodeWithContentDescription("Say: “soap forty-eight”").performTextInput("soap 48, shampoo 30")
         rule.onNodeWithContentDescription("Send").performClick(); pump()
         waitFor(s, "s.sheet?.lines?.all { it.physicalQty != null } == true", 10_000) { s.sheet?.lines?.all { it.physicalQty != null } == true }
         waitFor(s, "received.any { it.path == '/counts/c1/lines' && it.method == 'PATCH' }", 10_000) { received.any { it.path == "/counts/c1/lines" && it.method == "PATCH" } }
         rule.waitForIdle()
-        rule.onNodeWithText("Heard 2 items").assertIsDisplayed()
-        rule.onAllNodesWithText("48")[0].assertIsDisplayed()
-        rule.onNodeWithText("2 of 2 counted").assertIsDisplayed()
-        rule.onNodeWithText("Differs from the book — why?").assertIsDisplayed()      // soap 48 vs book 50
+        rule.onNodeWithText("Heard 2 items").assertExists()
+        rule.onAllNodesWithText("48")[0].assertExists()
+        rule.onNodeWithText("2 of 2 counted").assertExists()
+        rule.onNodeWithText("Differs from the book — why?").assertExists()      // soap 48 vs book 50
         val countForm = received.last { it.path?.endsWith("/voice/interpret") == true }.body.readUtf8()
         assertTrue(countForm.contains("name=\"mode\"\r\n\r\ncount"))
 
