@@ -120,7 +120,7 @@ class EndToEndTest {
         rule.onAllNodes(hasSetTextAction())[0].performTextInput("M1")
         rule.onAllNodes(hasSetTextAction())[1].performTextInput("secret-pass")
         rule.onNode(hasText("Sign in") and hasClickAction()).performClick(); pump()
-        waitFor(s, "s.me != null && s.stock.isNotEmpty()", 10_000) { s.me != null && s.stock.isNotEmpty() }
+        waitFor(s, "s.me != null && s.stock.isNotEmpty()", 10_000) { s.me != null && s.stock.isNotEmpty() && !s.busy }
         rule.waitForIdle()
     }
 
@@ -134,7 +134,7 @@ class EndToEndTest {
         // Ask by text (same server path as speech): the answer appears in the thread, nothing is written.
         rule.onNodeWithContentDescription("Ask: “how much soap is left?”").performTextInput("soap kitna bacha hai")
         rule.onNodeWithContentDescription("Send").performClick(); pump()
-        waitFor(s, "s.chat.any { it.body is ChatBody.Stock }", 10_000) { s.chat.any { it.body is ChatBody.Stock } }
+        waitFor(s, "stock answer", 10_000) { s.chat.any { it.body is ChatBody.Stock } && !s.busy }
         rule.waitForIdle()
         rule.onNodeWithText("Soap kitna bacha hai?").assertIsDisplayed()
         rule.onNodeWithText("हिंदी").assertIsDisplayed()
@@ -150,7 +150,7 @@ class EndToEndTest {
         rule.waitForIdle()
         rule.onNodeWithText("Weekly count overdue").assertIsDisplayed()
         rule.onNodeWithText("Start count").performClick(); pump()
-        waitFor(s, "s.sheet != null", 10_000) { s.sheet != null }
+        waitFor(s, "s.sheet != null", 10_000) { s.sheet != null && !s.busy }
         rule.waitForIdle()
         rule.onNodeWithText("0 of 2 counted").assertIsDisplayed()
         rule.onNodeWithContentDescription("Say: “soap forty-eight”").performTextInput("soap 48, shampoo 30")

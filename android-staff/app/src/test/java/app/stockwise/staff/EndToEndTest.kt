@@ -97,7 +97,7 @@ class EndToEndTest {
         rule.waitForIdle()
     }
 
-    private fun state() = AppState(ApplicationProvider.getApplicationContext(), server.url("/").toString().trimEnd('/')).also { it.booting = false; it.lang = "en" }
+    private fun state() = AppState(ApplicationProvider.getApplicationContext(), server.url("/").toString().trimEnd('/')).also { it.booting = false; it.lang = "en"; it.store.introSeen = true }
 
     @Test fun signIn_typeJob_confirm_savesOnce() {
         val s = state()
@@ -108,13 +108,13 @@ class EndToEndTest {
         rule.onAllNodes(hasSetTextAction())[1].performTextInput("1234")
         rule.onNode(hasText("Sign in") and hasClickAction()).performClick(); pump()
         waitFor(s, "s.me != null", 10_000) { s.me != null }
-        waitFor(s, "s.products.isNotEmpty()", 10_000) { s.products.isNotEmpty() }
+        waitFor(s, "s.products.isNotEmpty()", 10_000) { s.products.isNotEmpty() && !s.busy }
         rule.onNodeWithText("Hold to talk").assertIsDisplayed()
 
         // Type what would have been said; the server reads it the same way as speech.
         rule.onNodeWithContentDescription("Type: room 203, 2 soap").performTextInput("room 203, 2 soap")
         rule.onNodeWithContentDescription("Send").performClick(); pump()
-        waitFor(s, "s.chat.any { it.body is ChatBody.Job }", 10_000) { s.chat.any { it.body is ChatBody.Job } }
+        waitFor(s, "s.chat.any { it.body is ChatBody.Job }", 10_000) { s.chat.any { it.body is ChatBody.Job } && !s.busy }
         rule.waitForIdle()
 
         // The card shows Google's version of the words, the language tag, the room and the line. Nothing saved yet.
@@ -125,7 +125,7 @@ class EndToEndTest {
 
         // Confirm → one POST /transactions with an idempotency key and the proposal id → "Saved ✓ · A1B2C3".
         rule.onNodeWithText("Confirm").performClick(); pump()
-        waitFor(s, "s.chat.any { (it.body as? ChatBody.Job)?.state == ChatState.SAVED }", 10_000) { s.chat.any { (it.body as? ChatBody.Job)?.state == ChatState.SAVED } }
+        waitFor(s, "s.chat.any { (it.body as? ChatBody.Job)?.state == ChatState.SAVED }", 10_000) { s.chat.any { (it.body as? ChatBody.Job)?.state == ChatState.SAVED } && !s.busy }
         rule.waitForIdle()
         rule.onNodeWithText("Saved ✓ · A1B2C3").assertIsDisplayed()
         val posts = received.filter { it.path == "/transactions" && it.method == "POST" }
@@ -152,10 +152,10 @@ class EndToEndTest {
         rule.onAllNodes(hasSetTextAction())[0].performTextInput("S101")
         rule.onAllNodes(hasSetTextAction())[1].performTextInput("1234")
         rule.onNode(hasText("Sign in") and hasClickAction()).performClick(); pump()
-        waitFor(s, "s.products.isNotEmpty()", 10_000) { s.products.isNotEmpty() }
+        waitFor(s, "s.products.isNotEmpty()", 10_000) { s.products.isNotEmpty() && !s.busy }
         rule.onNodeWithContentDescription("Type: room 203, 2 soap").performTextInput("room 203, 2 soap")
         rule.onNodeWithContentDescription("Send").performClick(); pump()
-        waitFor(s, "s.chat.any { it.body is ChatBody.Job }", 10_000) { s.chat.any { it.body is ChatBody.Job } }
+        waitFor(s, "s.chat.any { it.body is ChatBody.Job }", 10_000) { s.chat.any { it.body is ChatBody.Job } && !s.busy }
         rule.waitForIdle()
         rule.onNodeWithText("Cancel").performClick(); pump()
         rule.waitForIdle()
