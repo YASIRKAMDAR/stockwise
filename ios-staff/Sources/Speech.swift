@@ -10,16 +10,18 @@ protocol Mic: AnyObject {
     func requestPermission(_ done: @escaping (Bool) -> Void)
     /// record: also keep the recording (for Google's model). onDone: nil = cancelled, "" = no words heard,
     /// otherwise the words the phone heard. Always called on the main thread.
-    func start(lang: String, record: Bool, onInterim: @escaping (String) -> Void, onDone: @escaping (String?) -> Void)
+    func start(lang: String, record: Bool, onInterim: @escaping (String) -> Void, onLevel: @escaping (Float) -> Void, onDone: @escaping (String?) -> Void)
     func stopTalking()
     func cancel()
     /// The last recording (m4a), once; nil when cancelled or not recording.
     func takeRecording() -> Data?
     func say(_ text: String, lang: String)
+    /// Whether this iPhone can read aloud in the language.
+    func hasVoice(lang: String) -> Bool
 }
 extension Mic {
     func start(lang: String, onInterim: @escaping (String) -> Void, onDone: @escaping (String?) -> Void) {
-        start(lang: lang, record: false, onInterim: onInterim, onDone: onDone)
+        start(lang: lang, record: false, onInterim: onInterim, onLevel: { _ in }, onDone: onDone)
     }
 }
 
@@ -63,7 +65,7 @@ final class SpeechMic: NSObject, Mic {
         }
     }
 
-    func start(lang: String, record: Bool, onInterim: @escaping (String) -> Void, onDone: @escaping (String?) -> Void) {
+    func start(lang: String, record: Bool, onInterim: @escaping (String) -> Void, onLevel: @escaping (Float) -> Void, onDone: @escaping (String?) -> Void) {
         stopAudio()
         task?.cancel(); task = nil
         synth.stopSpeaking(at: .immediate)
@@ -95,9 +97,20 @@ final class SpeechMic: NSObject, Mic {
             }
             input.removeTap(onBus: 0)
             let rec = self.rec
+            var lastLevelAt = Date.distantPast
             input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
                 req?.append(buffer)
                 if record { rec.write(buffer) }
+                // Loudness ~12 times a second, so the bar moves while the staff member speaks.
+                if Date().timeIntervalSince(lastLevelAt) > 0.08, let ch = buffer.floatChannelData?[0] {
+                    lastLevelAt = Date()
+                    let n = Int(buffer.frameLength)
+                    var sum: Float = 0
+                    for i in stride(from: 0, to: n, by: 4) { sum += ch[i] * ch[i] }
+                    let rms = sqrtf(sum / Float(max(1, n / 4)))
+                    let level = min(1, max(0, (20 * log10f(max(rms, 1e-6)) + 50) / 45))   // -50 dB … -5 dB → 0 … 1
+                    DispatchQueue.main.async { onLevel(level) }
+                }
             }
             engine.prepare()
             try engine.start()
@@ -160,8 +173,11 @@ final class SpeechMic: NSObject, Mic {
         engine.inputNode.removeTap(onBus: 0)
     }
 
+    func hasVoice(lang: String) -> Bool { AVSpeechSynthesisVoice(language: localeTag(lang)) != nil }
+    /// Reads aloud in the language asked for; if the iPhone has no voice for it (common for Gujarati), Hindi, then English.
     func say(_ text: String, lang: String) {
-        guard let voice = AVSpeechSynthesisVoice(language: localeTag(lang)) else { return }
+        let voice = AVSpeechSynthesisVoice(language: localeTag(lang)) ?? AVSpeechSynthesisVoice(language: "hi-IN") ?? AVSpeechSynthesisVoice(language: "en-IN")
+        guard let voice = voice else { return }
         let u = AVSpeechUtterance(string: text)
         u.voice = voice
         synth.stopSpeaking(at: .immediate)

@@ -8,7 +8,8 @@ final class FakeMic: Mic {
     func hasPermission() -> Bool { true }
     func requestPermission(_ done: @escaping (Bool) -> Void) { done(true) }
     func hasRecordPermission() -> Bool { true }
-    func start(lang: String, record: Bool, onInterim: @escaping (String) -> Void, onDone: @escaping (String?) -> Void) {}
+    func start(lang: String, record: Bool, onInterim: @escaping (String) -> Void, onLevel: @escaping (Float) -> Void, onDone: @escaping (String?) -> Void) {}
+    func hasVoice(lang: String) -> Bool { true }
     func takeRecording() -> Data? { nil }
     func stopTalking() {}
     func cancel() {}
@@ -126,8 +127,25 @@ final class ScreensTests: XCTestCase {
     func test15ChatListening() throws {
         let s = state()
         s.chat = [said("Room 203, two soap and one shampoo"), proposal(.saved("DEFB28"))]
-        s.voiceLive = true; s.voiceStartedAt = Date().addingTimeInterval(-2); s.voiceInterim = "Take ten soap from the"
+        s.voiceLive = true; s.voiceStartedAt = Date().addingTimeInterval(-2); s.voiceInterim = "Take ten soap from the"; s.voiceLevel = 0.7
         try shot("15-chat-listening", s)
+    }
+    func test17ChatLanguageTagAndWaiting() throws {
+        let s = state()
+        s.chat = [ChatMessage(role: .me, body: .said("Room 203 ma do soap aur ek shampoo mukyu", spoken: true, lang: "mixed"))]
+        s.busy = true; s.waitingLong = true
+        try shot("17-chat-still-asking", s)
+    }
+    func test18ChatRetry() throws {
+        let s = state()
+        s.chat = [ChatMessage(role: .me, body: .said("…", spoken: true)), ChatMessage(role: .app, body: .retry(heard: ""))]
+        try shot("18-chat-google-slow", s)
+    }
+    func test19ChatFallbackNote() throws {
+        let s = state()
+        s.chat = [ChatMessage(role: .me, body: .said("Return two soap to store", spoken: true, lang: "en")),
+                  ChatMessage(role: .app, body: .text(T(lang: "en").fromPhoneWords, warn: true)), proposal(.ready)]
+        try shot("19-chat-from-phone-words", s)
     }
     func test16ChatNotUnderstood() throws {
         let s = state()

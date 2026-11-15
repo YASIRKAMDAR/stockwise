@@ -29,6 +29,11 @@ final class AppState: ObservableObject {
     @Published var menuOpen = false
     @Published var voiceLive = false
     @Published var voiceInterim = ""
+    @Published var voiceLevel: Float = 0
+    @Published var waitingLong = false
+    @Published var draft = ""
+    @Published var online = true
+    private var toldNoGuVoice = false
     @Published var voiceStartedAt = Date()
     @Published var hearingYesNo = false
     @Published var chat: [ChatMessage] = []
@@ -60,7 +65,8 @@ final class AppState: ObservableObject {
         }
         let m = NWPathMonitor()
         m.pathUpdateHandler = { [weak self] path in
-            if path.status == .satisfied { Task { @MainActor in self?.flushOutbox() } }
+            let up = path.status == .satisfied
+            Task { @MainActor in self?.online = up; if up { self?.flushOutbox() } }
         }
         m.start(queue: DispatchQueue.global(qos: .utility))
         monitor = m
@@ -154,8 +160,10 @@ final class AppState: ObservableObject {
     var useCloudVoice: Bool { me?.config?.voiceProvider == "gemini" }
 
     func voiceStart() {
-        let cloud = useCloudVoice
+        let cloud = useCloudVoice && online
+        if !online && !mic.available(lang: lang) { notice = Notice(text: t.offlineVoiceGu); nudgeTap = true; return }
         guard cloud || mic.available(lang: lang) else { return }
+        if !online && useCloudVoice { notice = Notice(text: t.offlineVoice, warn: false) }
         guard cloud ? mic.hasRecordPermission() : mic.hasPermission() else {
             mic.requestPermission { [weak self] ok in
                 guard let self = self else { return }
@@ -163,11 +171,12 @@ final class AppState: ObservableObject {
             }
             return
         }
-        notice = nil; answer = nil; voiceInterim = ""; voiceStartedAt = Date(); voiceLive = true
+        if online { notice = nil }
+        answer = nil; voiceInterim = ""; voiceLevel = 0; voiceStartedAt = Date(); voiceLive = true
         let started = voiceStartedAt
-        mic.start(lang: lang, record: cloud, onInterim: { [weak self] text in self?.voiceInterim = text }, onDone: { [weak self] text in
+        mic.start(lang: lang, record: cloud, onInterim: { [weak self] text in self?.voiceInterim = text }, onLevel: { [weak self] l in self?.voiceLevel = l }, onDone: { [weak self] text in
             guard let self = self else { return }
-            self.voiceLive = false
+            self.voiceLive = false; self.voiceLevel = 0
             let ms = Int(Date().timeIntervalSince(started) * 1000)
             if cloud, let audio = self.mic.takeRecording(), audio.count > 2000, ms >= 600 {
                 self.interpretAudio(audio, heard: text ?? "", durationMs: ms)
@@ -195,7 +204,12 @@ final class AppState: ObservableObject {
     private var pendingProposalId: UUID? {
         chat.last { m in if case .proposal(_, .ready) = m.body { return true }; return false }?.id
     }
-    private func say(_ text: String, _ l: String? = nil) { if !text.isEmpty { mic.say(text, lang: l ?? lang) } }
+    private func say(_ text: String, _ l: String? = nil) {
+        guard !text.isEmpty else { return }
+        let sl = l ?? lang
+        if sl == "gu", !mic.hasVoice(lang: "gu"), !toldNoGuVoice { toldNoGuVoice = true; notice = Notice(text: t.noGuVoice, warn: false) }
+        mic.say(text, lang: sl)
+    }
 
     /// Typed text (or words heard by the phone) appears as the staff member's message; the app answers below it.
     func interpret(_ text: String, durationMs: Int) {
@@ -220,7 +234,7 @@ final class AppState: ObservableObject {
         busy = true
         let l = lang
         Task {
-            await run(bubble: bubble.id, fallbackText: heard) { try await self.api.interpretAudio(hotelId: h, audio: audio, lang: l, durationMs: durationMs) }
+            await run(bubble: bubble.id, fallbackText: heard) { try await self.api.interpretAudio(hotelId: h, audio: audio, lang: l, durationMs: durationMs, heard: heard) }
             busy = false
         }
     }
@@ -254,21 +268,36 @@ final class AppState: ObservableObject {
     }
 
     private func run(bubble: UUID? = nil, fallbackText: String = "", _ call: () async throws -> Proposal) async {
+        // After 3 s the "Understanding…" bubble says the app is still waiting for Google, so the screen never looks frozen.
+        waitingLong = false
+        let waitTask = Task { try? await Task.sleep(nanoseconds: 3_000_000_000); if !Task.isCancelled { self.waitingLong = true } }
+        defer { waitTask.cancel(); waitingLong = false }
         do {
             let p = try await call()
-            if let b = bubble, let i = index(b), let tr = p.transcript, !tr.isEmpty { chat[i].body = .said(tr, spoken: true) }
+            let tag = langCode(p.detectedLanguage)
+            if let b = bubble, let i = index(b), let tr = p.transcript, !tr.isEmpty { chat[i].body = .said(tr, spoken: true, lang: tag) }
+            else if let b = bubble, let i = index(b), case .said(let tx, let sp, _) = chat[i].body { chat[i].body = .said(tx, spoken: sp, lang: tag) }
             if bubble != nil, handleShort(p.transcript ?? "") { return }
+            if p.warnings?.contains("FALLBACK_RULES") == true { post(.text(t.fromPhoneWords, warn: true)) }
             handle(p)
         } catch let e as ApiError {
             if e.status == 401 { api.clearSession(); me = nil; return }
-            // Google's model unavailable: fall back to the words the phone heard.
-            if e.status >= 500, bubble != nil, !fallbackText.isEmpty, let h = hotelId,
-               let p = try? await api.interpret(hotelId: h, text: fallbackText, lang: lang, durationMs: 0) {
-                handle(p); return
+            if e.status >= 500, bubble != nil {
+                // Google didn't answer in time and the server had nothing to fall back on: say so, with a way forward.
+                post(.retry(heard: fallbackText)); say(t.googleSlow)
+                return
             }
             post(.text(e.message, warn: true))
-        } catch { post(.text(t.offlineLogin, warn: true)) }
+        } catch { post(.retry(heard: fallbackText)) }
     }
+
+    /// Short code for the language tag on a bubble.
+    private func langCode(_ detected: String?) -> String? {
+        switch detected { case "gu-IN": return "gu"; case "hi-IN": return "hi"; case "en-IN": return "en"; case "mixed": return "mixed"; default: return nil }
+    }
+
+    /// Tap a bubble (or "Type it") to put the words in the box and fix them before sending again.
+    func editSaid(_ text: String) { draft = text == "…" ? "" : text; notice = nil }
 
     /// The language the staff member actually spoke, when it was one language.
     private func spokenLang(_ detected: String?) -> String? {
@@ -368,7 +397,7 @@ final class AppState: ObservableObject {
         guard let yl = yesNoLang else { return }
         guard mic.hasPermission() else { mic.requestPermission { _ in }; return }
         hearingYesNo = true
-        mic.start(lang: yl, onInterim: { _ in }, onDone: { [weak self] text in
+        mic.start(lang: yl, record: false, onInterim: { _ in }, onLevel: { _ in }, onDone: { [weak self] text in
             guard let self = self else { return }
             self.hearingYesNo = false
             guard let text = text, let answer = yesNo(text) else { return }

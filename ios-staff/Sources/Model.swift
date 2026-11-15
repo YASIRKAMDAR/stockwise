@@ -24,7 +24,7 @@ struct QueryRow: Codable { let productId: String; let name: String; var store: I
 struct Proposal: Codable {
     let proposalId: String; let status: String; let action: String
     var transcript: String?; var lines: [ProposalLine]?; var queryResult: [QueryRow]?
-    var detectedLanguage: String?
+    var detectedLanguage: String?; var warnings: [String]?
 }
 struct EventLine: Codable { var name: String?; var quantity: Int?; var roomNumber: String? }
 struct ActivityEvent: Codable, Identifiable {
@@ -83,7 +83,9 @@ enum ChatRole { case me, app }
 enum ChatState { case ready, saving, saved(String), offline, cancelled }
 struct BagLine: Hashable { let name: String; let native: String?; let emoji: String; let qty: Int }
 enum ChatBody {
-    case said(String, spoken: Bool)
+    case said(String, spoken: Bool, lang: String? = nil)
+    /// Google didn't answer in time: offer to say it again or type it.
+    case retry(heard: String)
     case text(String, warn: Bool)
     case proposal(Flow, ChatState)
     case stock([QueryRow])

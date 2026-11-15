@@ -92,7 +92,7 @@ struct OutboxPanels: View {
 
 struct ChatFeed: View {
     @EnvironmentObject var s: AppState
-    private var scrollKey: String { "\(s.chat.count)-\(s.voiceLive)-\(s.voiceInterim.count)-\(s.busy)-\(s.notice?.text ?? "")" }
+    private var scrollKey: String { "\(s.chat.count)-\(s.voiceLive)-\(s.voiceInterim.count)-\(s.busy)-\(s.waitingLong)-\(s.notice?.text ?? "")" }
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
@@ -100,7 +100,9 @@ struct ChatFeed: View {
                     OutboxPanels()
                     ForEach(s.chat) { m in ChatRow(m: m) }
                     if s.voiceLive { LiveBubble() }
-                    if s.busy && s.flow == nil { AppBubble { HStack(spacing: 10) { ProgressView(); Text(s.t.understanding).foregroundColor(C.ink2) } } }
+                    if s.busy && s.flow == nil {
+                        AppBubble { HStack(spacing: 10) { ProgressView(); Text(s.waitingLong ? s.t.stillAsking : s.t.understanding).foregroundColor(C.ink2) } }
+                    }
                     if let n = s.notice { Banner(text: n.text, warn: n.warn) }
                     Color.clear.frame(height: 1).id("end")
                 }
@@ -116,7 +118,8 @@ struct ChatRow: View {
     let m: ChatMessage
     var body: some View {
         switch m.body {
-        case .said(let text, let spoken): MeBubble(text: text, spoken: spoken)
+        case .said(let text, let spoken, let lang): MeBubble(text: text, spoken: spoken, lang: lang)
+        case .retry(let heard): AppBubble(warn: true) { RetryCard(heard: heard) }
         case .text(let text, let warn):
             AppBubble(warn: warn) { Text(text).font(.system(size: 17, weight: .semibold)).foregroundColor(warn ? C.amber : C.ink) }
         case .proposal(let f, let state): AppBubble { ProposalCard(id: m.id, f: f, state: state) }
@@ -148,19 +151,61 @@ struct BubbleShape: Shape {
 }
 
 struct MeBubble: View {
+    @EnvironmentObject var s: AppState
     let text: String
     let spoken: Bool
+    var lang: String? = nil
     var body: some View {
         HStack {
             Spacer(minLength: 56)
-            HStack(alignment: .top, spacing: 8) {
-                Image(systemName: spoken ? "mic.fill" : "keyboard").font(.system(size: 13)).foregroundColor(Color.white.opacity(0.75)).padding(.top, 4)
-                Text(text).font(.system(size: 17)).foregroundColor(.white)
+            Button(action: { s.editSaid(text) }) {
+                VStack(alignment: .trailing, spacing: 4) {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: spoken ? "mic.fill" : "keyboard").font(.system(size: 13)).foregroundColor(Color.white.opacity(0.75)).padding(.top, 4)
+                        Text(text).font(.system(size: 17)).foregroundColor(.white).multilineTextAlignment(.leading)
+                    }
+                    HStack(spacing: 6) {
+                        if let tag = s.t.langTag(lang) {
+                            Text(tag).font(.system(size: 11, weight: .semibold)).foregroundColor(C.indigo)
+                                .padding(.horizontal, 7).padding(.vertical, 2).background(Color.white.opacity(0.9)).clipShape(Capsule())
+                        }
+                        Image(systemName: "pencil").font(.system(size: 10, weight: .bold)).foregroundColor(Color.white.opacity(0.7))
+                        Text(s.t.tapToFix).font(.system(size: 11)).foregroundColor(Color.white.opacity(0.7))
+                    }
+                }
+                .padding(.horizontal, 14).padding(.vertical, 10)
+                .background(BubbleShape(mine: true).fill(C.indigo))
             }
-            .padding(.horizontal, 14).padding(.vertical, 10)
-            .background(BubbleShape(mine: true).fill(C.indigo))
+            .buttonStyle(.plain)
         }
         .accessibilityElement(children: .combine)
+        .accessibilityHint(s.t.tapToFix)
+    }
+}
+
+/// Google didn't answer: two big ways forward instead of a dead end.
+struct RetryCard: View {
+    @EnvironmentObject var s: AppState
+    let heard: String
+    var body: some View {
+        let t = s.t
+        VStack(alignment: .leading, spacing: 10) {
+            Text(t.googleSlow).font(.system(size: 17, weight: .semibold)).foregroundColor(C.amber)
+            if !heard.isEmpty {
+                Text(heard).font(.system(size: 15)).foregroundColor(C.ink2).lineLimit(2)
+            }
+            HStack(spacing: 10) {
+                Button(action: { s.voiceHint() }) {
+                    Label(t.sayAgain, systemImage: "mic.fill").font(.system(size: 16, weight: .semibold)).foregroundColor(.white)
+                        .frame(maxWidth: .infinity).frame(height: 44).background(C.brick).clipShape(Capsule())
+                }
+                Button(action: { s.editSaid(heard) }) {
+                    Label(t.typeIt, systemImage: "keyboard").font(.system(size: 16, weight: .semibold)).foregroundColor(C.ink)
+                        .frame(maxWidth: .infinity).frame(height: 44).background(C.paper).clipShape(Capsule())
+                        .overlay(Capsule().stroke(C.line, lineWidth: 1.5))
+                }
+            }
+        }
     }
 }
 
@@ -171,7 +216,7 @@ struct LiveBubble: View {
         HStack {
             Spacer(minLength: 56)
             HStack(spacing: 8) {
-                Circle().fill(C.brick).frame(width: 9, height: 9)
+                LevelMeter(level: s.voiceLevel)
                 Text(s.voiceInterim.isEmpty ? s.t.listening : s.voiceInterim).font(.system(size: 17)).foregroundColor(C.indigo)
             }
             .padding(.horizontal, 14).padding(.vertical, 10)

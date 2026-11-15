@@ -74,10 +74,10 @@ final class Api {
         try await upload(hotelId: hotelId, lang: lang, durationMs: durationMs, file: ("speech.txt", "text/plain", Data(text.utf8)))
     }
     /// The recording itself, so Google's model can hear Gujarati, Hindi and English mixed in one sentence.
-    func interpretAudio(hotelId: String, audio: Data, lang: String, durationMs: Int) async throws -> Proposal {
-        try await upload(hotelId: hotelId, lang: lang, durationMs: durationMs, file: ("speech.m4a", "audio/mp4", audio))
+    func interpretAudio(hotelId: String, audio: Data, lang: String, durationMs: Int, heard: String) async throws -> Proposal {
+        try await upload(hotelId: hotelId, lang: lang, durationMs: durationMs, heard: heard, file: ("speech.m4a", "audio/mp4", audio))
     }
-    private func upload(hotelId: String, lang: String, durationMs: Int, file: (name: String, type: String, data: Data)) async throws -> Proposal {
+    private func upload(hotelId: String, lang: String, durationMs: Int, heard: String = "", file: (name: String, type: String, data: Data)) async throws -> Proposal {
         let boundary = "sw-\(UUID().uuidString)"
         var d = Data()
         func field(_ name: String, _ value: String) {
@@ -86,6 +86,8 @@ final class Api {
         field("hotelId", hotelId)
         field("preferredLanguage", localeTag(lang))
         field("durationMs", String(max(0, durationMs)))
+        field("client", "ios")
+        if !heard.isEmpty { field("heard", heard) }   // what the phone heard, so the server can still answer if Google is slow
         d.append(Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"\(file.name)\"\r\nContent-Type: \(file.type)\r\n\r\n".utf8))
         d.append(file.data)
         d.append(Data("\r\n--\(boundary)--\r\n".utf8))

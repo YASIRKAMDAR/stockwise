@@ -54,6 +54,18 @@ struct T {
     var inBag: String { s("in your bag", "आपके बैग में", "તમારી બેગમાં") }
     var youCanSay: String { s("You can say", "आप बोल सकते हैं", "તમે બોલી શકો") }
     var examples: [String] { lang == "hi" ? ["“रूम 203 में दो साबुन रखे”", "“स्टोर से दस साबुन लिए”", "“तीन शैम्पू वापस”", "“बीस साबुन आए”", "“कितने साबुन बचे?”", "“मेरा बैग” · “इतिहास” · “साइन आउट”"] : lang == "gu" ? ["“રૂમ 203 માં બે સાબુ મૂક્યા”", "“સ્ટોરમાંથી દસ સાબુ લીધા”", "“ત્રણ શેમ્પૂ પરત”", "“વીસ સાબુ આવ્યા”", "“કેટલા સાબુ બચ્યા?”", "“મારી બેગ” · “ઇતિહાસ” · “સાઇન આઉટ”"] : ["“Put two soaps in room 203”", "“Take ten soap from the store”", "“Return three shampoo”", "“Twenty soap arrived”", "“How many soap are left?”", "“My bag” · “History” · “Sign out”"] }
+    var stillAsking: String { s("Still asking Google…", "अभी भी Google से पूछ रहे हैं…", "હજુ Google ને પૂછી રહ્યા છીએ…") }
+    var googleSlow: String { s("Google didn’t answer in time.", "Google ने समय पर जवाब नहीं दिया।", "Google એ સમયસર જવાબ ન આપ્યો.") }
+    var sayAgain: String { s("Say it again", "फिर से बोलें", "ફરી બોલો") }
+    var typeIt: String { s("Type it", "लिख दें", "લખો") }
+    var tapToFix: String { s("Tap to correct", "सुधारने के लिए दबाएँ", "સુધારવા દબાવો") }
+    var fromPhoneWords: String { s("Google was slow, so this is from what the phone heard. Check it.", "Google धीमा था, इसलिए यह फ़ोन ने जो सुना उससे है। जाँच लें।", "Google ધીમું હતું, એટલે આ ફોને જે સાંભળ્યું તેના પરથી છે. ચકાસો.") }
+    var noGuVoice: String { s("This iPhone has no Gujarati voice, so replies are read in Hindi.", "इस iPhone में गुजराती आवाज़ नहीं है, इसलिए जवाब हिंदी में पढ़े जाएँगे।", "આ iPhone માં ગુજરાતી અવાજ નથી, એટલે જવાબ હિન્દીમાં વંચાશે.") }
+    var offlineVoice: String { s("No signal. The phone will listen by itself; keep sentences short.", "सिग्नल नहीं है। फ़ोन खुद सुनेगा; वाक्य छोटे रखें।", "સિગ્નલ નથી. ફોન જાતે સાંભળશે; વાક્યો ટૂંકાં રાખો.") }
+    var offlineVoiceGu: String { s("No signal, and this iPhone can’t hear Gujarati on its own. Tap the buttons below until you’re back online.", "सिग्नल नहीं है, और यह iPhone खुद गुजराती नहीं सुन सकता। ऑनलाइन होने तक नीचे के बटन दबाएँ।", "સિગ્નલ નથી, અને આ iPhone જાતે ગુજરાતી સાંભળી શકતો નથી. ઓનલાઇન થાઓ ત્યાં સુધી નીચેનાં બટન દબાવો.") }
+    func langTag(_ code: String?) -> String? {
+        switch code { case "gu": return "ગુજરાતી"; case "hi": return "हिंदी"; case "en": return "English"; case "mixed": return s("Mixed", "मिश्रित", "મિશ્ર"); default: return nil }
+    }
     var listening: String { s("Listening…", "सुन रहे हैं…", "સાંભળી રહ્યા છીએ…") }
     var isThisRight: String { s("Is this right?", "क्या यह सही है?", "શું આ બરાબર છે?") }
     var sayYes: String { s("Tap ✓, or hold the mic and say “yes”", "✓ दबाएँ, या माइक दबाकर “हाँ” बोलें", "✓ દબાવો, અથવા માઇક દબાવી “હા” બોલો") }

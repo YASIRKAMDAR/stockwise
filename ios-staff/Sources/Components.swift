@@ -129,14 +129,14 @@ struct LangRow: View {
 /// The bar at the bottom: type and the button becomes Send; leave it empty and it's a hold-to-talk mic.
 struct VoiceBar: View {
     @EnvironmentObject var s: AppState
-    @State private var text = ""
     @State private var armed = false
+    @FocusState private var focused: Bool
 
-    private var typing: Bool { !text.trimmingCharacters(in: .whitespaces).isEmpty && !s.voiceLive }
+    private var typing: Bool { !s.draft.trimmingCharacters(in: .whitespaces).isEmpty && !s.voiceLive }
     private func submit() {
-        let v = text.trimmingCharacters(in: .whitespaces)
+        let v = s.draft.trimmingCharacters(in: .whitespaces)
         if v.isEmpty || s.busy { return }
-        text = ""
+        s.draft = ""
         s.interpret(v, durationMs: 0)
     }
 
@@ -147,7 +147,7 @@ struct VoiceBar: View {
                 if s.voiceLive {
                     TimelineView(.periodic(from: Date(), by: 0.25)) { ctx in
                         HStack(spacing: 8) {
-                            Circle().fill(C.brick).frame(width: 10, height: 10)
+                            LevelMeter(level: s.voiceLevel)
                             Text(fmtSecs(ctx.date.timeIntervalSince(s.voiceStartedAt))).font(.system(size: 17, weight: .bold)).foregroundColor(C.ink)
                             Text(armed ? t.releaseToCancel : (s.voiceInterim.isEmpty ? t.slideToCancel : s.voiceInterim))
                                 .font(.system(size: 16, weight: armed ? .bold : .regular))
@@ -157,12 +157,14 @@ struct VoiceBar: View {
                         }
                     }
                 } else {
-                    TextField(t.typeHere, text: $text)
+                    TextField(t.typeHere, text: $s.draft)
                         .font(.system(size: 17))
                         .foregroundColor(C.ink)
                         .submitLabel(.send)
+                        .focused($focused)
                         .onSubmit(submit)
                         .disabled(s.busy)
+                        .onChange(of: s.draft) { v in if !v.isEmpty && !focused { focused = true } }
                 }
             }
             .padding(.horizontal, 20)
@@ -192,5 +194,25 @@ struct VoiceBar: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .background(C.linen)
+    }
+}
+
+
+/// Five bars that rise with the staff member's voice, so they can see they're being heard.
+struct LevelMeter: View {
+    let level: Float
+    var body: some View {
+        HStack(alignment: .center, spacing: 2) {
+            ForEach(0..<5, id: \.self) { i in
+                let threshold = Float(i) / 5
+                let on = level > threshold
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(on ? C.brick : C.brick.opacity(0.25))
+                    .frame(width: 4, height: CGFloat(8 + i * 3))
+                    .animation(.easeOut(duration: 0.08), value: on)
+            }
+        }
+        .frame(width: 26, height: 22)
+        .accessibilityHidden(true)
     }
 }
