@@ -3,13 +3,13 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError, errorText, get, loadDrafts, mutate, NetworkError, saveDrafts, type Draft } from '../api';
 import { DICTS, hasVoice, LANG_CODES, LANG_NAMES, speak, type FlowKind, type Lang, type T } from '../i18n';
 import { ACTION_LABEL, ErrorBanner, fmtTime, Loading, StatusBadge, Stepper, useMe } from '../ui/common';
-import { IconArrived, IconBag, IconClock, IconHome, IconMic, IconReceive, IconRepeat, IconReturn, IconRoom, IconSend, IconStop, IconTake } from '../ui/icons';
+import { IconArrived, IconBag, IconClock, IconHelp, IconHome, IconMic, IconReceive, IconRepeat, IconReturn, IconRoom, IconSend, IconStop, IconTake } from '../ui/icons';
 import { hasSpeechRecognition, localCommand, recognize, type Listener, type LocalCommand } from '../ui/speech';
-import { Composer } from '../ui/Composer';
+import { Composer, LevelMeter } from '../ui/Composer';
 import { BurgerMenu } from '../ui/Menu';
 import { emojiFor, Flow, loadLast, nativeName, type FlowState, type Product } from './Flow';
 
-type Tab = 'home' | 'bag' | 'transfers' | 'history';
+type Tab = 'home' | 'bag' | 'transfers' | 'history' | 'attempts';
 const START: Record<FlowKind, FlowState['step']> = { PLACE_IN_ROOM: 'room', CHECKOUT_TO_STAFF: 'items', RETURN_TO_STORE: 'items', SUPPLIER_RECEIPT: 'items', TRANSFER_DISPATCH: 'hotel' };
 const ICON: Record<string, () => JSX.Element> = { PLACE_IN_ROOM: IconRoom, CHECKOUT_TO_STAFF: IconTake, RETURN_TO_STORE: IconReturn, SUPPLIER_RECEIPT: IconArrived, TRANSFER_DISPATCH: IconSend, RECEIVE: IconReceive, TRANSFER_RECEIPT: IconReceive, REVERSAL: IconReturn };
 
@@ -22,6 +22,14 @@ export function StaffApp() {
   const [tab, setTab] = useState<Tab>('home');
   const [flow, setFlow] = useState<FlowState | null>(null);
   const [fix, setFix] = useState<{ text: string; n: number } | null>(null);   // words to correct, handed to the home composer
+  const introKey = `sw_intro_${me.id}`;
+  const [intro, setIntro] = useState(() => { try { return !localStorage.getItem(introKey); } catch { return false; } });
+  const [practice, setPractice] = useState(false);
+  const closeIntro = (tryIt: boolean) => {
+    try { localStorage.setItem(introKey, '1'); } catch { /* ignore */ }
+    setIntro(false);
+    if (tryIt) { setFlow(null); setTab('home'); setPractice(true); speak(t.introPractice, lang); }
+  };
   const changeLang = (l: Lang) => { setLang(l); api('PATCH', '/me', { language: l }).catch(() => {}); };
   const start = (kind: FlowKind, extra: Partial<FlowState> = {}) => setFlow({ kind, step: START[kind], lines: [], ...extra });
 
@@ -31,7 +39,11 @@ export function StaffApp() {
       <header className="topbar">
         <BurgerMenu
           who={<><b>{me.displayName}</b><div className="small">{hotel.name}</div></>}
-          items={nav.map(([k, Icon, label]) => ({ key: k, label, Icon, current: tab === k && !flow, onClick: () => { setFlow(null); setTab(k); } }))}
+          items={[
+            ...nav.map(([k, Icon, label]) => ({ key: k, label, Icon, current: tab === k && !flow, onClick: () => { setFlow(null); setTab(k); } })),
+            { key: 'howto', label: t.howToUse, Icon: IconHelp, current: false, onClick: () => setIntro(true) },
+            { key: 'attempts', label: t.voiceAttempts, Icon: IconMic, current: tab === 'attempts' && !flow, onClick: () => { setFlow(null); setTab('attempts'); } },
+          ]}
           extra={<label className="small muted">{t.language}
             <select id="lang" value={lang} onChange={(e) => changeLang(e.target.value as Lang)} style={{ marginTop: 4 }}>
               {(Object.keys(LANG_NAMES) as Lang[]).map((l) => <option key={l} value={l}>{LANG_NAMES[l]}</option>)}
@@ -41,17 +53,19 @@ export function StaffApp() {
       </header>
       <main className="content">
         {flow ? <Flow key={flow.kind + flow.step + (flow.proposalId ?? '')} init={flow} hotelId={hotelId} lang={lang} t={t} onExit={() => setFlow(null)} onFix={(text) => { setFlow(null); setTab('home'); setFix((f) => ({ text, n: (f?.n ?? 0) + 1 })); }} />
-          : tab === 'home' ? <Home t={t} lang={lang} hotelId={hotelId} start={start} fix={fix} openReceive={() => setTab('transfers')} command={(c) => { if ('go' in c) setTab(c.go); else if ('lang' in c) changeLang(c.lang); else logout(); }} />
+          : tab === 'home' ? <Home t={t} lang={lang} hotelId={hotelId} start={start} fix={fix} openReceive={() => setTab('transfers')} command={(c) => { if ('go' in c) { setTab(c.go); if (c.go === 'bag' && practice) { setPractice(false); speak(t.introDone, lang); } } else if ('lang' in c) changeLang(c.lang); else logout(); }} practice={practice} />
           : tab === 'bag' ? <MyBag t={t} lang={lang} hotelId={hotelId} start={start} />
+          : tab === 'attempts' ? <Attempts t={t} />
           : tab === 'transfers' ? <Transfers t={t} hotelId={hotelId} start={start} />
           : <History t={t} hotelId={hotelId} tz={hotel.timezone} />}
       </main>
+      {intro && <Intro t={t} onClose={closeIntro} />}
     </div>
   );
 }
 
 // ---------------- Home ----------------
-function Home({ t, lang, hotelId, start, openReceive, command, fix }: { t: T; lang: Lang; hotelId: string; start: (k: FlowKind, extra?: Partial<FlowState>) => void; openReceive: () => void; command: (c: LocalCommand) => void; fix?: { text: string; n: number } | null }) {
+function Home({ t, lang, hotelId, start, openReceive, command, fix, practice }: { t: T; lang: Lang; hotelId: string; start: (k: FlowKind, extra?: Partial<FlowState>) => void; openReceive: () => void; command: (c: LocalCommand) => void; fix?: { text: string; n: number } | null; practice?: boolean }) {
   const { me } = useMe();
   const incoming = useQuery<any[]>({ queryKey: ['transfers', hotelId], queryFn: () => get(`/transfers?hotelId=${hotelId}`) });
   const nIncoming = (incoming.data ?? []).filter((x) => x.toHotel.id === hotelId && ['IN_TRANSIT', 'PARTIALLY_RECEIVED'].includes(x.status)).length;
@@ -60,6 +74,7 @@ function Home({ t, lang, hotelId, start, openReceive, command, fix }: { t: T; la
   return (
     <>
       <Drafts t={t} />
+      {practice && <div className="banner ok" role="status">🎤 {t.introPractice}</div>}
       <Voice t={t} lang={lang} hotelId={hotelId} start={start} openReceive={openReceive} command={command} fix={fix} />
       <p className="small muted" style={{ margin: '4px 0 -6px' }}>{t.orTap}</p>
       <div className="tiles">
@@ -149,7 +164,7 @@ function Voice({ t, lang, hotelId, start, openReceive, command, fix }: { t: T; l
   // Hard stop at the configured maximum length.
   useEffect(() => {
     if (state !== 'recording') return;
-    const id = window.setTimeout(() => finish('send'), max * 1000);
+    const id = window.setTimeout(() => finish('send'), Math.min(15, max) * 1000);   // long holds cost more and understand less
     return () => clearTimeout(id);
   }, [state]);
 
@@ -473,6 +488,50 @@ function Receive({ tr, t, isSender }: { tr: any; t: T; isSender: boolean }) {
           {short > 0 && <button className="btn block" disabled={busy} onClick={() => submit(true)}>{t.allCame}</button>}
         </div>
       )}
+    </div>
+  );
+}
+
+/** Four short cards shown once after the first sign-in, ending with a practice command that changes nothing. */
+function Intro({ t, onClose }: { t: T; onClose: (tryIt: boolean) => void }) {
+  const [page, setPage] = useState(0);
+  const [, tick] = useState(0);
+  useEffect(() => { if (page !== 0) return; const id = setInterval(() => tick((n) => n + 1), 120); return () => clearInterval(id); }, [page]);
+  const icons = ['🎤', '👆', '✅', '✨'];
+  const demo = 0.3 + 0.7 * Math.abs(Math.sin(Date.now() / 300));
+  return (
+    <div className="modal-back intro" role="dialog" aria-label={t.howToUse}>
+      <div className="intro-card">
+        <button className="btn quiet intro-skip" onClick={() => onClose(false)}>{t.introSkip}</button>
+        <div className="intro-icon" aria-hidden="true">{icons[page]}</div>
+        {page === 0 && <div className="intro-meter"><LevelMeter level={demo} /></div>}
+        <h2>{t.intro[page][0]}</h2>
+        <p>{t.intro[page][1]}</p>
+        <div className="intro-dots" aria-hidden="true">{[0, 1, 2, 3].map((i) => <i key={i} className={i === page ? 'on' : ''} />)}</div>
+        {page < 3 ? <button className="btn primary lg block" onClick={() => setPage(page + 1)}>{t.introNext}</button>
+          : <button className="btn go lg block" onClick={() => onClose(true)}>{t.introTry}</button>}
+      </div>
+    </div>
+  );
+}
+
+/** The staff member's own last voice attempts: what was heard, in which language, how fast, and what happened. For quick testing. */
+function Attempts({ t }: { t: T }) {
+  const q = useQuery<any>({ queryKey: ['my-voice-attempts'], queryFn: () => get('/me/voice-attempts?limit=10'), refetchInterval: 15_000 });
+  const rows: any[] = q.data?.attempts ?? [];
+  const langName: Record<string, string> = { 'gu-IN': 'ગુજરાતી', 'hi-IN': 'हिंदी', 'en-IN': 'English', mixed: t.langTags.mixed };
+  if (!rows.length) return <div className="muted">{t.noAttempts}</div>;
+  return (
+    <div className="stack">
+      {rows.map((a, i) => (
+        <div key={i} className="panel stack" style={{ gap: 6 }}>
+          <div className="row spread small"><b className="muted">{new Date(a.created_at).toLocaleTimeString()}</b>
+            <b style={{ color: a.status === 'FAILED' ? 'var(--brick)' : 'var(--ink)' }}>
+              {a.status === 'FAILED' ? `✗ ${a.error_code ?? 'FAILED'}` : a.fallback ? '~ phone words' : a.confirmed ? '✓ saved' : a.status === 'AMBIGUOUS' ? '? needed help' : `✓ ${a.action ?? ''}`}</b></div>
+          <div>{a.transcript ? `“${a.transcript}”` : '—'}</div>
+          <div className="small muted">{a.language && <span className="lang-tag" style={{ marginLeft: 0, marginRight: 6 }}>{langName[a.language] ?? a.language}</span>}{a.input_kind === 'text' ? '⌨️' : '🎤'} · {((a.latency_ms ?? 0) / 1000).toFixed(1)} s</div>
+        </div>
+      ))}
     </div>
   );
 }

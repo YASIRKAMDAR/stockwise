@@ -31,3 +31,4 @@ export const IconStore = () => <I><path d="M3 9l1.5-5h15L21 9M3 9v11h18V9M3 9h18
 export const IconTruck = IconSend;
 export const IconSignOut = () => <I><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" /></I>;
 export const IconKeyboard = () => <I><rect x="2" y="6" width="20" height="12" rx="2" /><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10" /></I>;
+export const IconHelp = () => <I><circle cx="12" cy="12" r="9" /><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .8-1 1.7M12 17h.01" /></I>;

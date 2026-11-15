@@ -377,3 +377,14 @@ tr.justheard td { background: #E3F5EC; transition: background .6s; }
 .heard-line .fix { color: var(--ink-3); font-size: .75rem; margin-left: 6px; }
 .retry-card .row { display: flex; gap: 10px; margin-top: 8px; }
 .retry-card .row .btn { flex: 1; }
+
+/* First-launch walkthrough */
+.intro-card { background: var(--paper); border-radius: 20px; padding: 28px 22px 22px; width: min(420px, 100%); text-align: center; position: relative; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.intro-skip { position: absolute; top: 8px; right: 8px; }
+.intro-icon { width: 110px; height: 110px; border-radius: 50%; background: var(--marigold); display: grid; place-items: center; font-size: 52px; margin-top: 10px; }
+.intro-meter { transform: scale(2); height: 44px; display: grid; place-items: center; }
+.intro-card h2 { margin: 6px 0 0; font-size: 1.5rem; }
+.intro-card p { margin: 0; color: var(--ink-2); font-size: 1.05rem; line-height: 1.45; }
+.intro-dots { display: flex; gap: 8px; margin: 6px 0; }
+.intro-dots i { width: 8px; height: 8px; border-radius: 50%; background: var(--line-2); }
+.intro-dots i.on { background: var(--indigo); }

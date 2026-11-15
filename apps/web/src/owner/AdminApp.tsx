@@ -438,6 +438,7 @@ function VoiceHealth({ h }: { h: any }) {
         <>
           <div className={`banner ${tone}`} style={{ fontSize: '1.05rem' }}>
             <b>{rate}% answered</b> · typical {secs(tot.p50_ms)} · slowest 5% {secs(tot.p95_ms)} · {tot.failed} failed · {tot.fallback} answered from phone words
+            {typeof tot.cost_usd === 'number' && <> · ${tot.cost_usd.toFixed(3)} spent</>}
             <div className="small" style={{ marginTop: 4 }}>Target: 95% answered, slowest 5% under 4 seconds.</div>
           </div>
           <div className="table-wrap"><table>
