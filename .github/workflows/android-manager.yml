@@ -33,6 +33,7 @@ jobs:
 
       - name: Render screens (Roborazzi)
         working-directory: android-manager
+        id: tests
         run: gradle :app:recordRoborazziDebug --no-daemon
         continue-on-error: true
 
@@ -75,3 +76,7 @@ jobs:
           body: |
             Native Android app for hotel managers: ask the store by voice, weekly count hands-free, deliveries, activity. Signed with ${{ env.SIGNED_WITH }}.
             Sign in with your code and passcode. Hold the mic to speak, or type; works with Android's own speech recognition.
+
+      - name: Tests must pass
+        if: steps.tests.outcome != 'success'
+        run: echo "Unit / end-to-end tests failed (see 'Render screens' above and the test report)"; exit 1

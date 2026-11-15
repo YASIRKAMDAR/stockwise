@@ -1,6 +1,5 @@
 package app.stockwise.staff
 
-import androidx.compose.ui.test.assertExists
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasClickAction
