@@ -17,7 +17,7 @@ import androidx.core.content.ContextCompat
 import androidx.emoji2.bundled.BundledEmojiCompatConfig
 import androidx.emoji2.text.EmojiCompat
 import app.stockwise.manager.ui.Mic
-import app.stockwise.manager.ui.StaffApp
+import app.stockwise.manager.ui.ManagerApp
 
 class MainActivity : ComponentActivity() {
     private lateinit var state: AppState
