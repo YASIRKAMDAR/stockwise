@@ -8,6 +8,7 @@ import { postEvent } from './ledger.ts';
 import { storeLocation, transitLocation } from './locations.ts';
 import { markProposalConsumed } from './transactions.ts';
 import { closeRequestForTransfer } from './requests.ts';
+import { consumeBatches } from './catalog.ts';
 
 type CreateBody = z.infer<typeof CreateTransferBody> & { proposalId?: string };
 type ReceiveBody = z.infer<typeof ReceiveTransferBody> & { final?: boolean };
@@ -54,6 +55,8 @@ export async function dispatchTransfer(db: Db, actor: Actor, body: CreateBody, i
       movements: lines.map((l) => ({ productId: l.productId, quantity: l.quantity, fromLocationId: store, toLocationId: transit })),
       relatedTransferId: transferId, voiceProposalId: proposalId, note: body.note ?? null,
     });
+    // Stock leaving the site comes out of its lots, soonest to expire first.
+    for (const l of lines) await consumeBatches(tx, body.fromHotelId, l.productId, l.quantity);
     await markProposalConsumed(tx, proposalId, out.eventId);
     return { status: 201, body: { ...out, state: 'COMMITTED' as const, transferId, refCode: ref, status: 'IN_TRANSIT' } };
   });

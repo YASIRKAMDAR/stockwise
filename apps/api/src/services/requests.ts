@@ -133,7 +133,7 @@ export async function topUpLines(db: Db | Tx, orgId: string, hotelId: string, wa
                        WHERE r.hotel_id = $2 AND r.status = 'OPEN' AND l.product_id = p.id), 0) AS requested,
             COALESCE((SELECT b.quantity FROM stock_balances b JOIN stock_locations sl ON sl.id = b.location_id WHERE sl.hotel_id = $3 AND sl.type='HOTEL_STORE' AND b.product_id = p.id), 0) AS warehouse
        FROM products p LEFT JOIN hotel_product_settings hps ON hps.product_id = p.id AND hps.hotel_id = $2
-      WHERE p.organization_id = $1 AND p.active ORDER BY p.name`, [orgId, hotelId, warehouseId]);
+      WHERE p.organization_id = $1 AND p.active AND (p.room_item OR EXISTS (SELECT 1 FROM stock_balances b0 JOIN stock_locations l0 ON l0.id = b0.location_id WHERE l0.hotel_id = $2 AND b0.product_id = p.id) OR EXISTS (SELECT 1 FROM hotel_product_settings s0 WHERE s0.hotel_id = $2 AND s0.product_id = p.id)) ORDER BY p.name`, [orgId, hotelId, warehouseId]);
   return r.rows.map((x) => ({ productId: x.product_id, name: x.name, par: Number(x.par), store: Number(x.store), onTheWay: Number(x.on_the_way), requested: Number(x.requested), warehouse: Number(x.warehouse),
     quantity: Math.max(0, Number(x.par) - Number(x.store) - Number(x.on_the_way) - Number(x.requested)) }));
 }

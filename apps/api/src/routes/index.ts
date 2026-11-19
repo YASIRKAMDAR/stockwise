@@ -16,6 +16,9 @@ import { requireKey } from '../services/idempotency.ts';
 import * as reports from '../services/reports.ts';
 import { createTransaction, reverseTransaction } from '../services/transactions.ts';
 import { dispatchTransfer, listTransfers, receiveTransfer, resolveTransfer } from '../services/transfers.ts';
+import { createItem, importItems, listCategories, listItems } from '../services/catalog.ts';
+import { createSupplier, getSupplier, listSuppliers, patchSupplier, requireManager, setSupplierCategory, supplierCategoryItems } from '../services/suppliers.ts';
+import { addDeliveryPhoto, cancelOrder, createOrder, draftOrderFromText, getDeliveryPhoto, getOrder, listOrders, receiveDelivery, sendOrder, siteHome, suggestOrder, updateOrder } from '../services/orders.ts';
 import { createRequest, declineRequest, deleteSchedule, dispatchRequest, listRequests, listSchedules, runDueSchedules, topUpLines, upsertSchedule, warehouseOf } from '../services/requests.ts';
 import { interpret, myVoiceAttempts, voiceHealth, voiceUsage } from '../voice/service.ts';
 import type { VoiceProvider } from '../voice/provider.ts';
@@ -125,7 +128,9 @@ export async function registerRoutes(app: FastifyInstance, { db, cfg, provider }
     const r = await db.query(
       `SELECT p.id, p.sku, p.name, p.unit, p.icon, p.active,
               COALESCE(json_agg(json_build_object('locale', al.locale, 'alias', al.alias)) FILTER (WHERE al.id IS NOT NULL), '[]') AS aliases
-         FROM products p LEFT JOIN product_aliases al ON al.product_id = p.id WHERE p.organization_id = $1 GROUP BY p.id ORDER BY p.name`, [a.orgId]);
+         FROM products p LEFT JOIN product_aliases al ON al.product_id = p.id WHERE p.organization_id = $1
+          AND ($2::boolean OR p.room_item OR EXISTS (SELECT 1 FROM stock_balances b0 WHERE b0.product_id = p.id))
+        GROUP BY p.id ORDER BY p.name`, [a.orgId, Q(req).all === '1']);
     return r.rows;
   });
   app.get('/hotels/:hotelId/stock', async (req) => {
@@ -149,7 +154,7 @@ export async function registerRoutes(app: FastifyInstance, { db, cfg, provider }
     const a = requireActor(req); requireOwner(a);
     const b = parse(CreateProductBody, req.body);
     const out = await withTx(db, async (tx) => {
-      const p = await tx.query('INSERT INTO products (organization_id, sku, name, unit) VALUES ($1,$2,$3,$4) RETURNING id', [a.orgId, b.sku, b.name, b.unit]).catch((e) => {
+      const p = await tx.query('INSERT INTO products (organization_id, sku, name, unit, room_item) VALUES ($1,$2,$3,$4,true) RETURNING id', [a.orgId, b.sku, b.name, b.unit]).catch((e) => {
         if (e.code === '23505') throw err('INVALID_INPUT', 'SKU already exists'); throw e; });
       for (const al of b.aliases) await tx.query('INSERT INTO product_aliases (product_id, locale, alias) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING', [p.rows[0].id, al.locale, al.alias]);
       await tx.query(`INSERT INTO audit_events (organization_id, actor_user_id, action, entity_type, entity_id, details) VALUES ($1,$2,'PRODUCT_CREATED','product',$3,$4)`, [a.orgId, a.userId, p.rows[0].id, JSON.stringify(b)]);
@@ -321,6 +326,72 @@ export async function registerRoutes(app: FastifyInstance, { db, cfg, provider }
   });
 
   // ---------------- Transfers ----------------
+  // ---- Catalog ----
+  const pid = (req: FastifyRequest, k = 'id') => parse(uuid, (req.params as any)[k]);
+  app.get('/catalog/categories', async (req) => listCategories(db, requireActor(req).orgId));
+  app.get('/catalog/items', async (req) => {
+    const q = Q(req);
+    return listItems(db, requireActor(req), { siteId: parse(uuid, q.siteId), q: q.q, categoryId: q.categoryId ? parse(uuid, q.categoryId) : undefined,
+      filter: q.filter === 'low' || q.filter === 'usefirst' ? q.filter : undefined, limit: q.limit ? Number(q.limit) : undefined, offset: q.offset ? Number(q.offset) : undefined });
+  });
+  app.post('/catalog/items', async (req, reply) => {
+    const a = requireActor(req); requireManager(a);
+    const b = parse(z.object({ name: z.string().min(2).max(80), unit: z.string().min(1).max(20).default('PCS'), categoryId: uuid.nullish(), photoUrl: z.string().url().max(500).nullish(),
+      price: z.number().nonnegative().nullish(), hasExpiry: z.boolean().optional(), shelfLifeDays: z.number().int().positive().nullish() }), req.body);
+    const out = await createItem(db, a, b);
+    return reply.code(out.existed ? 200 : 201).send(out);
+  });
+  // Owner uploads the item master export (CSV text). Safe to repeat: items are matched on their code.
+  app.post('/catalog/import', { bodyLimit: 3 * 1024 * 1024 }, async (req) => {
+    const a = requireActor(req); requireOwner(a);
+    return importItems(db, a.orgId, parse(z.object({ csv: z.string().min(10) }), req.body).csv);
+  });
+
+  // ---- Suppliers ----
+  const SupplierBody = z.object({ name: z.string().min(2).max(80), phone: z.string().max(30).nullish(), onWhatsapp: z.boolean().optional(), deliveryDays: z.number().int().min(0).max(60).nullish(), categoryIds: z.array(uuid).max(40).optional() });
+  app.get('/suppliers', async (req) => listSuppliers(db, requireActor(req), { q: Q(req).q, categoryId: Q(req).categoryId ? parse(uuid, Q(req).categoryId) : undefined }));
+  app.post('/suppliers', async (req, reply) => reply.code(201).send(await createSupplier(db, requireActor(req), parse(SupplierBody, req.body))));
+  app.get('/suppliers/:id', async (req) => getSupplier(db, requireActor(req), pid(req)));
+  app.patch('/suppliers/:id', async (req) => patchSupplier(db, requireActor(req), pid(req), parse(SupplierBody.partial().extend({ favourite: z.boolean().optional(), active: z.boolean().optional() }), req.body)));
+  app.get('/suppliers/:id/categories/:categoryId/items', async (req) => supplierCategoryItems(db, requireActor(req), pid(req), pid(req, 'categoryId'), Q(req).q));
+  app.put('/suppliers/:id/categories/:categoryId', async (req) =>
+    setSupplierCategory(db, requireActor(req), pid(req), pid(req, 'categoryId'), parse(z.object({ allItems: z.boolean(), productIds: z.array(uuid).max(500).optional() }), req.body)));
+
+  // ---- Orders to suppliers and deliveries ----
+  const OrderLine = z.object({ productId: uuid, quantity: z.number().int().positive().max(1_000_000), unitPrice: z.number().nonnegative().nullish() });
+  const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+  app.get('/sites/:id/home', async (req) => siteHome(db, requireActor(req), pid(req)));
+  app.get('/orders', async (req) => listOrders(db, requireActor(req), parse(uuid, Q(req).siteId), Q(req).status));
+  app.get('/orders/suggest', async (req) => suggestOrder(db, requireActor(req), parse(uuid, Q(req).siteId), Q(req).supplierId ? parse(uuid, Q(req).supplierId) : undefined));
+  app.post('/orders/draft-from-text', async (req) => draftOrderFromText(db, requireActor(req), parse(z.object({ siteId: uuid, text: z.string().min(2).max(1000), supplierId: uuid.nullish() }), req.body)));
+  app.post('/orders', async (req, reply) => reply.code(201).send(await createOrder(db, requireActor(req),
+    parse(z.object({ siteId: uuid, supplierId: uuid, lines: z.array(OrderLine).min(1).max(200), note: z.string().max(500).nullish(), expectedDate: day.nullish(), source: z.enum(['FORM', 'VOICE', 'CHAT']).optional() }), req.body))));
+  app.get('/orders/:id', async (req) => getOrder(db, requireActor(req), pid(req)));
+  app.patch('/orders/:id', async (req) => updateOrder(db, requireActor(req), pid(req),
+    parse(z.object({ lines: z.array(OrderLine).min(1).max(200).optional(), supplierId: uuid.optional(), note: z.string().max(500).nullish(), expectedDate: day.nullish() }), req.body)));
+  app.post('/orders/:id/send', async (req) => sendOrder(db, requireActor(req), pid(req)));
+  app.post('/orders/:id/cancel', async (req) => cancelOrder(db, requireActor(req), pid(req)));
+  const DeliveryLine = z.object({ productId: uuid, received: z.number().int().min(0).max(1_000_000), rejected: z.number().int().min(0).max(1_000_000).optional(),
+    rejectReason: z.string().max(80).nullish(), unitPrice: z.number().nonnegative().nullish(), expiryDate: day.nullish() });
+  const DeliveryBody = z.object({ lines: z.array(DeliveryLine).min(1).max(200), billTotal: z.number().nonnegative().nullish(), note: z.string().max(500).nullish(), checkedBy: z.enum(['COUNT', 'BILL_PHOTO']).optional() });
+  app.post('/orders/:id/deliveries', async (req, reply) => send(reply, await receiveDelivery(db, requireActor(req), { ...parse(DeliveryBody, req.body), orderId: pid(req) }, idem(req))));
+  // A delivery with no order behind it (a hotel buying direct, or goods that simply turned up).
+  app.post('/deliveries', async (req, reply) => send(reply, await receiveDelivery(db, requireActor(req), parse(DeliveryBody.extend({ siteId: uuid, supplierId: uuid }), req.body), idem(req))));
+  app.post('/deliveries/:id/photos', async (req, reply) => {
+    const a = requireActor(req);
+    if (!req.isMultipart()) throw err('INVALID_INPUT', 'multipart/form-data expected');
+    let kind = 'GOODS'; let file: Buffer | null = null; let mime = '';
+    for await (const part of req.parts({ limits: { fileSize: 4 * 1024 * 1024, files: 1, fields: 3 } })) {
+      if (part.type === 'file') { file = await part.toBuffer(); mime = part.mimetype; } else if (part.fieldname === 'kind') kind = String(part.value);
+    }
+    if (!file) throw err('INVALID_INPUT', 'No photo received');
+    return reply.code(201).send(await addDeliveryPhoto(db, a, pid(req), kind === 'BILL' ? 'BILL' : 'GOODS', file, mime));
+  });
+  app.get('/delivery-photos/:id', async (req, reply) => {
+    const ph = await getDeliveryPhoto(db, requireActor(req), pid(req));
+    return reply.header('content-type', ph.contentType).header('cache-control', 'private, max-age=86400').send(ph.data);
+  });
+
   // ---- Requests to the warehouse ----
   const RequestBody = z.object({ hotelId: uuid, lines: z.array(z.object({ productId: uuid, quantity: z.number().int().positive() })).min(1), note: z.string().max(500).nullish() });
   app.post('/requests', async (req, reply) => {

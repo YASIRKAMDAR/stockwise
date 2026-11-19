@@ -5,6 +5,9 @@ import { createHotel, createOrg, createProduct, createRooms, createUser, DEMO_PR
 import { createTransaction } from '../services/transactions.ts';
 import { dispatchTransfer } from '../services/transfers.ts';
 import { createRequest, dispatchRequest } from '../services/requests.ts';
+import { importItems } from '../services/catalog.ts';
+import { createSupplier } from '../services/suppliers.ts';
+import { createOrder, receiveDelivery, sendOrder } from '../services/orders.ts';
 
 export const DEMO_PIN = '1234', DEMO_PW = 'demo-password-123';
 
@@ -64,5 +67,45 @@ export async function seedDemo(db: Db) {
   // Every hotel auto-asks for a top-up to par on Monday mornings.
   for (const h of hotels) await db.query('INSERT INTO request_schedules (organization_id, hotel_id, weekday, hour, created_by) VALUES ($1,$2,1,7,$3)', [orgId, h, ownerId]);
 
+  // A slice of a real-looking item list, three suppliers, one delivery already checked in and one order on its way.
+  await importItems(db, orgId, DEMO_ITEMS_CSV);
+  const it = Object.fromEntries((await db.query(`SELECT sku, id FROM products WHERE organization_id = $1 AND sku LIKE 'ITM-%'`, [orgId])).rows.map((r) => [r.sku, r.id as string]));
+  const cat = Object.fromEntries((await db.query('SELECT short_name, id FROM categories WHERE organization_id = $1', [orgId])).rows.map((r) => [r.short_name, r.id as string]));
+  const dairy = (await createSupplier(db, whm, { name: 'Demo Dairy', phone: '+91 90000 00001', deliveryDays: 1, categoryIds: [cat.Food] })).id;
+  const prov = (await createSupplier(db, whm, { name: 'Demo Provisions', phone: '+91 90000 00002', deliveryDays: 2, categoryIds: [cat.Food] })).id;
+  await createSupplier(db, whm, { name: 'Demo Cleaning Supplies', phone: '+91 90000 00003', deliveryDays: 2, categoryIds: [cat.Cleaning, cat.Housekeeping].filter(Boolean) });
+  for (const [sku, min, par] of [['ITM-0019', 15, 40], ['ITM-0021', 8, 24], ['ITM-0001', 80, 200], ['ITM-0293', 20, 60], ['ITM-0025', 20, 120], ['ITM-0178', 5, 25], ['ITM-0731', 20, 60]] as const)
+    await db.query('INSERT INTO hotel_product_settings (hotel_id, product_id, reorder_threshold, par_level) VALUES ($1,$2,$3,$4) ON CONFLICT (hotel_id, product_id) DO UPDATE SET reorder_threshold = EXCLUDED.reorder_threshold, par_level = EXCLUDED.par_level', [warehouse, it[sku], min, par]);
+  const day = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
+  const o1 = await createOrder(db, whm, { siteId: warehouse, supplierId: dairy, lines: [{ productId: it['ITM-0025'], quantity: 30 }, { productId: it['ITM-0178'], quantity: 6 }, { productId: it['ITM-0019'], quantity: 12 }] });
+  await sendOrder(db, whm, o1.id);
+  await receiveDelivery(db, whm, { orderId: o1.id, lines: [
+    { productId: it['ITM-0025'], received: 30, unitPrice: 77, expiryDate: day(2) }, { productId: it['ITM-0178'], received: 6, unitPrice: 360, expiryDate: day(2) },
+    { productId: it['ITM-0019'], received: 12, unitPrice: 590.48, expiryDate: day(150) }] }, randomUUID());
+  const o2 = await createOrder(db, whm, { siteId: warehouse, supplierId: dairy, lines: [{ productId: it['ITM-0025'], quantity: 120 }, { productId: it['ITM-0178'], quantity: 25 }, { productId: it['ITM-0019'], quantity: 20 }], expectedDate: day(0) });
+  await sendOrder(db, whm, o2.id);
+  await receiveDelivery(db, whm, { siteId: warehouse, supplierId: prov, lines: [{ productId: it['ITM-0001'], received: 60, unitPrice: 114 }, { productId: it['ITM-0293'], received: 18, unitPrice: 210, expiryDate: day(160) }] }, randomUUID());
+
   return { orgId, ownerId, hotels, warehouse };
 }
+
+const DEMO_ITEMS_CSV = `Code,Name,Alias/Nick Name,Category,Base UOM,Purchase Price,Has Expiry,Shelf Life (days),Use As,Status
+ITM-0001,BASMATI RICE,RICE,Food & Beverage,KG,114,No,,Consumable,Active
+ITM-0011,TEA POWDER TATA AGNI,TEA,Food & Beverage,KG,235,No,,Consumable,Active
+ITM-0012,MAIDA 1 KG,MAIDA,Food & Beverage,KG,37.5,No,,Consumable,Active
+ITM-0019,AMUL BUTTER,BUTTER,Food & Beverage,KG,590.48,Yes,180,Consumable,Active
+ITM-0021,AMUL CHEESE,CHEESE,Food & Beverage,KG,538.1,Yes,180,Consumable,Active
+ITM-0022,AMUL CHEESE SLICE 750 GM,CHEESE SLICE,Food & Beverage,PAC,419.05,Yes,180,Consumable,Active
+ITM-0025,AMUL TAAZA MILK,MILK,Food & Beverage,LTR,77,Yes,7,Consumable,Active
+ITM-0178,FRESH PANEER,PANEER,Food & Beverage,KG,360,Yes,7,Consumable,Active
+ITM-0293,MUSTARD OIL 1 LTR,MUSTARD OIL,Food & Beverage,LTR,210,Yes,180,Consumable,Active
+ITM-0387,SESAME OIL,TIL OIL,Food & Beverage,LTR,,Yes,180,Consumable,Active
+ITM-0562,ONION,KANDA,Fruit & Vegetable,KG,40,Yes,5,Consumable,Active
+ITM-0567,POTATO,BATATA,Fruit & Vegetable,KG,30,Yes,5,Consumable,Active
+ITM-0673,SHAMPOO 20 ML,SHAMPOO SMALL,Housekeeping,BTL,5.5,No,,Consumable,Active
+ITM-0677,SOAP 20 GM,SOAP SMALL,Housekeeping,PCS,5.5,No,,Consumable,Active
+ITM-0725,DISH WASH LIQUID SOAP,DISH WASH,Chemicals & Cleaning,LTR,26.5,No,,Consumable,Active
+ITM-0731,HARPIC RED,HARPIC,Chemicals & Cleaning,LTR,110,No,,Consumable,Active
+ITM-0898,LED BULB 0-5 WATT,LED BULB,Engineering & Maintenance,PCS,,No,,Consumable,Active
+ITM-1202,BATH TOWEL MAXUS,BATH TOWEL,Uniforms & Linen,PCS,397,No,,Consumable,Active
+`;

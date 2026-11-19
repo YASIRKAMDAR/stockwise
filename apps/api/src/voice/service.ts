@@ -21,7 +21,8 @@ const INFO_ACTIONS = new Set(['SHOW_ALERTS', 'SHOW_TRANSFERS', 'SHOW_ROOM_USE', 
 async function loadCatalog(db: Db, orgId: string, hotelId: string) {
   const [products, rooms, hotels] = await Promise.all([
     db.query(`SELECT p.id, p.sku, p.name, p.unit, COALESCE(array_agg(a.alias) FILTER (WHERE a.alias IS NOT NULL), '{}') AS aliases
-                FROM products p LEFT JOIN product_aliases a ON a.product_id = p.id WHERE p.organization_id = $1 AND p.active GROUP BY p.id ORDER BY p.name`, [orgId]),
+                FROM products p LEFT JOIN product_aliases a ON a.product_id = p.id WHERE p.organization_id = $1 AND p.active
+                 AND (p.room_item OR EXISTS (SELECT 1 FROM stock_balances b0 JOIN stock_locations l0 ON l0.id = b0.location_id WHERE l0.hotel_id = $2 AND b0.product_id = p.id) OR EXISTS (SELECT 1 FROM hotel_product_settings s0 WHERE s0.hotel_id = $2 AND s0.product_id = p.id)) GROUP BY p.id ORDER BY p.name`, [orgId, hotelId]),
     db.query(`SELECT id, room_number FROM rooms WHERE hotel_id = $1 AND active ORDER BY room_number`, [hotelId]),
     db.query(`SELECT id, code, name FROM hotels WHERE organization_id = $1 AND active ORDER BY code`, [orgId]),
   ]);

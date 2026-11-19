@@ -52,6 +52,7 @@ async function snapshotLines(tx: Tx, countId: string, orgId: string, store: stri
      SELECT $1, p.id, COALESCE(sb.quantity, 0), COALESCE(sb.version, 0)
        FROM products p LEFT JOIN stock_balances sb ON sb.location_id = $3 AND sb.product_id = p.id
       WHERE p.organization_id = $2 AND p.active AND ($4::uuid[] IS NULL OR p.id = ANY($4::uuid[]))
+        AND (p.room_item OR sb.product_id IS NOT NULL OR $4::uuid[] IS NOT NULL)
      ON CONFLICT (count_id, product_id) DO UPDATE SET expected_qty = EXCLUDED.expected_qty, expected_version = EXCLUDED.expected_version, physical_qty = NULL, reason = NULL`,
     [countId, orgId, store, onlyProducts ?? null],
   );

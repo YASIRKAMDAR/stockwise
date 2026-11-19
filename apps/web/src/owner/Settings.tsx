@@ -31,6 +31,7 @@ export function Settings() {
       <StockAdmin hotelId={hotelId} />
       <Rooms hotelId={hotelId} />
       <Thresholds hotelId={hotelId} />
+      {isOwner && <ImportItems />}
       {isOwner && <Products />}
       {isOwner && <Hotels />}
     </>
@@ -208,5 +209,32 @@ function Hotels() {
       <Msg />
       <ErrorBanner error={q.error} />
     </Section>
+  );
+}
+
+/** Owner uploads the item master (CSV export). Items are matched on their code, so uploading again only updates. */
+function ImportItems() {
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const onFile = async (f: File | undefined) => {
+    if (!f) return;
+    setBusy(true); setMsg(null); setError(null);
+    try {
+      const r = await api<{ created: number; updated: number; skipped: number; categories: number }>('POST', '/catalog/import', { csv: await f.text() });
+      setMsg(`${r.created} items added, ${r.updated} updated, ${r.skipped} skipped, in ${r.categories} categories.`);
+      qc.invalidateQueries();
+    } catch (e) { setError(e); } finally { setBusy(false); }
+  };
+  return (
+    <section className="panel">
+      <h2>Import the item list</h2>
+      <p className="muted small">Upload the item master as a CSV file (columns: Code, Name, Category, Base UOM, and optionally Alias/Nick Name, Purchase Price, Has Expiry, Shelf Life (days), Status). Inactive rows are skipped. Uploading again updates items and never deletes anything.</p>
+      <label className="field">Item master file<input type="file" accept=".csv,text/csv" disabled={busy} onChange={(e) => onFile(e.target.files?.[0])} /></label>
+      {busy && <Loading />}
+      {msg && <p role="status">{msg}</p>}
+      {error != null && <ErrorBanner error={error} />}
+    </section>
   );
 }

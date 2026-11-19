@@ -15,7 +15,7 @@ export async function createRooms(db: Db, hotelId: string, numbers: string[]) {
   return out;
 }
 export async function createProduct(db: Db, orgId: string, sku: string, name: string, unit: string, aliases: [string, string][] = []) {
-  const id = (await db.query('INSERT INTO products (organization_id, sku, name, unit) VALUES ($1,$2,$3,$4) RETURNING id', [orgId, sku, name, unit])).rows[0].id as string;
+  const id = (await db.query('INSERT INTO products (organization_id, sku, name, unit, room_item) VALUES ($1,$2,$3,$4,true) RETURNING id', [orgId, sku, name, unit])).rows[0].id as string;
   for (const [locale, alias] of aliases) await db.query('INSERT INTO product_aliases (product_id, locale, alias) VALUES ($1,$2,$3)', [id, locale, alias]);
   return id;
 }

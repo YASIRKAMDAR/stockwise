@@ -9,7 +9,8 @@ export async function stockMatrix(db: Db, orgId: string, hotelIds: string[]) {
     `WITH hp AS (
        SELECT h.id AS hotel_id, h.name AS hotel_name, h.code AS hotel_code, p.id AS product_id, p.name, p.sku, p.unit, p.icon
          FROM hotels h CROSS JOIN products p
-        WHERE h.organization_id = $1 AND h.id = ANY($2::uuid[]) AND p.organization_id = $1 AND p.active)
+        WHERE h.organization_id = $1 AND h.id = ANY($2::uuid[]) AND p.organization_id = $1 AND p.active
+          AND (p.room_item OR EXISTS (SELECT 1 FROM stock_balances b0 JOIN stock_locations l0 ON l0.id = b0.location_id WHERE l0.hotel_id = h.id AND b0.product_id = p.id) OR EXISTS (SELECT 1 FROM hotel_product_settings s0 WHERE s0.hotel_id = h.id AND s0.product_id = p.id)))
      SELECT hp.*,
        COALESCE((SELECT b.quantity FROM stock_balances b JOIN stock_locations sl ON sl.id=b.location_id
                   WHERE sl.type='HOTEL_STORE' AND sl.hotel_id=hp.hotel_id AND b.product_id=hp.product_id), 0) AS store,
