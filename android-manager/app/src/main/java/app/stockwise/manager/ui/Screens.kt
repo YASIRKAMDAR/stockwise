@@ -216,7 +216,7 @@ fun VoiceBar(s: AppState, mic: Mic) {
     // Recordings stop by themselves at 15 s: long holds cost more and understand less.
     LaunchedEffect(live) { if (live) { delay(15_000); if (live) mic.release() } }
     Composer(
-        placeholder = if (s.voiceMode == "count") t.countHere else t.askHere, slideText = t.slideToCancel, releaseCancelText = t.releaseToCancel,
+        placeholder = if (s.page is Page.OrderForm) t.sayItems else if (s.voiceMode == "count") t.countHere else t.askHere, slideText = t.slideToCancel, releaseCancelText = t.releaseToCancel,
         live = live, startedAt = startedAt, interim = interim, level = level, busy = s.busy, waitingLong = s.waitingLong,
         stillAsking = t.stillAsking, micAvailable = s.cloudVoice || mic.available,
         draft = s.draft, onDraft = { s.draft = it },

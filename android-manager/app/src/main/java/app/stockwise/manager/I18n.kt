@@ -222,6 +222,7 @@ class T(val lang: String) {
     val addAnItem get() = s("Add an item", "सामान जोड़ें", "વસ્તુ ઉમેરો")
     fun haveLast(have: Int, last: Int?) = s("have $have" + (last?.let { " · last time $it" } ?: ""), "$have हैं" + (last?.let { " · पिछली बार $it" } ?: ""), "$have છે" + (last?.let { " · ગયા વખતે $it" } ?: ""))
     val orderHint get() = s("Tap a number to type it, or hold the mic and say “20 kilo paneer”.", "संख्या पर दबाकर लिखें, या माइक दबाकर बोलें “20 किलो पनीर”।", "આંકડા પર દબાવીને લખો, અથવા માઇક દબાવીને બોલો “20 કિલો પનીર”.")
+    val sayItems get() = s("Say: “20 kilo paneer, 5 butter”", "बोलें: “20 किलो पनीर, 5 बटर”", "બોલો: “20 કિલો પનીર, 5 બટર”")
     val sendToSupplier get() = s("Send to supplier", "सप्लायर को भेजें", "સપ્લાયરને મોકલો")
     val addOneItem get() = s("Type a quantity for at least one item.", "कम से कम एक सामान की मात्रा लिखें।", "ઓછામાં ઓછી એક વસ્તુની માત્રા લખો.")
     val messagePreview get() = s("This message goes to the supplier", "यह संदेश सप्लायर को जाएगा", "આ સંદેશ સપ્લાયરને જશે")
