@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.activity.compose.BackHandler
@@ -148,6 +149,7 @@ fun Shell(s: AppState, mic: Mic, drawerOpen: Boolean = false) {
             item(t.deliveries, Icons.Filled.LocalShipping, Tab.DELIVERIES)
             item(t.orders, Icons.Filled.ShoppingCart, Tab.ORDERS)
             item(t.suppliers, Icons.Filled.People, Tab.SUPPLIERS)
+            item(t.messages + ((s.inbox?.unread ?: 0).takeIf { it > 0 }?.let { " ($it)" } ?: ""), Icons.Filled.Forum, Tab.INBOX)
             item(t.activity, Icons.Filled.History, Tab.ACTIVITY)
             HorizontalDivider(color = C.Line, modifier = Modifier.padding(vertical = 8.dp))
             if (s.hotels.size > 1) {
@@ -174,7 +176,7 @@ fun Shell(s: AppState, mic: Mic, drawerOpen: Boolean = false) {
                 }
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    val title = when (s.tab) { Tab.TODAY -> t.today; Tab.COUNT -> t.count; Tab.STOCK -> t.stock; Tab.DELIVERIES -> t.deliveries; Tab.ACTIVITY -> t.activity; Tab.ATTEMPTS -> t.voiceAttempts; Tab.SUPPLIERS -> t.suppliers; Tab.ORDERS -> t.orders }
+                    val title = when (s.tab) { Tab.TODAY -> t.today; Tab.COUNT -> t.count; Tab.STOCK -> t.stock; Tab.DELIVERIES -> t.deliveries; Tab.ACTIVITY -> t.activity; Tab.ATTEMPTS -> t.voiceAttempts; Tab.SUPPLIERS -> t.suppliers; Tab.ORDERS -> t.orders; Tab.INBOX -> t.messages }
                     Text(if (page != null) pageTitle(t, page) else title, style = MaterialTheme.typography.titleMedium, maxLines = 1)
                     Text(s.hotel?.name ?: "", style = MaterialTheme.typography.bodyMedium, fontSize = 13.sp, maxLines = 1)
                 }
@@ -191,6 +193,7 @@ fun Shell(s: AppState, mic: Mic, drawerOpen: Boolean = false) {
                     s.tab == Tab.STOCK -> if (s.isWarehouse) CatalogStockScreen(s) else StockScreen(s)
                     s.tab == Tab.SUPPLIERS -> SuppliersScreen(s)
                     s.tab == Tab.ORDERS -> OrdersScreen(s)
+                    s.tab == Tab.INBOX -> InboxScreen(s)
                     s.tab == Tab.DELIVERIES -> DeliveriesScreen(s)
                     s.tab == Tab.ACTIVITY -> ActivityScreen(s)
                     else -> AttemptsScreen(s)
@@ -198,7 +201,7 @@ fun Shell(s: AppState, mic: Mic, drawerOpen: Boolean = false) {
             }
             s.notice?.let { Banner(it.text, it.warn, Modifier.padding(horizontal = 12.dp, vertical = 4.dp).clickable { s.notice = null }) }
             // Forms with their own keyboard hide the voice bar; the order screen keeps it, so items can be spoken in.
-            if (s.page == null || s.page is Page.OrderForm) VoiceBar(s, mic)
+            if (s.page == null || s.page is Page.OrderForm || s.page is Page.Chat) VoiceBar(s, mic)
         }
     }
     BackHandler(enabled = s.page != null) { s.back() }
@@ -216,7 +219,7 @@ fun VoiceBar(s: AppState, mic: Mic) {
     // Recordings stop by themselves at 15 s: long holds cost more and understand less.
     LaunchedEffect(live) { if (live) { delay(15_000); if (live) mic.release() } }
     Composer(
-        placeholder = if (s.page is Page.OrderForm) t.sayItems else if (s.voiceMode == "count") t.countHere else t.askHere, slideText = t.slideToCancel, releaseCancelText = t.releaseToCancel,
+        placeholder = if (s.page is Page.Chat) t.writeMessage else if (s.page is Page.OrderForm) t.sayItems else if (s.voiceMode == "count") t.countHere else t.askHere, slideText = t.slideToCancel, releaseCancelText = t.releaseToCancel,
         live = live, startedAt = startedAt, interim = interim, level = level, busy = s.busy, waitingLong = s.waitingLong,
         stillAsking = t.stillAsking, micAvailable = s.cloudVoice || mic.available,
         draft = s.draft, onDraft = { s.draft = it },
@@ -376,6 +379,7 @@ fun TodayScreen(s: AppState) {
             s.corrections.forEach { c -> AttentionRow(s, "LOW", t.asksToCorrect(c.requestedByName ?: c.displayName ?: ""), c.note, t.review to Tab.ACTIVITY) }
             s.alerts.filter { it.category != "STOCK_REQUEST" }.forEach { a -> AttentionRow(s, a.severity, a.title, a.detail, s.alertAction(a)) }
         }
+        (s.inbox?.unread ?: 0).takeIf { it > 0 }?.let { n -> Box(Modifier.clickable { s.go(Tab.INBOX) }) { Banner("💬 " + t.newMessages(n), warn = false) } }
         if (s.isWarehouse) HotelsAskingPanel(s) { changing = it }
         else if (s.hasWarehouse) FromWarehousePanel(s) { asking = true }
         BuyingPanels(s, full = false)

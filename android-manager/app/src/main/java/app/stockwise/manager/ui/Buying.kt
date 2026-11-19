@@ -623,6 +623,7 @@ fun PageScreen(s: AppState, p: Page) {
         is Page.Message -> MessagePage(s, p)
         is Page.Check -> CheckPage(s, p)
         is Page.AddItem -> AddItemPage(s)
+        is Page.Chat -> ChatPage(s, p)
     }
 }
 
@@ -633,4 +634,5 @@ fun pageTitle(t: T, p: Page): String = when (p) {
     is Page.Message -> t.sendToSupplier
     is Page.Check -> t.checkDelivery
     is Page.AddItem -> t.addItem
+    is Page.Chat -> p.thread.siteName
 }

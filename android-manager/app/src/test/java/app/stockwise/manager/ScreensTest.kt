@@ -147,6 +147,19 @@ class ScreensTest {
     @Test fun m37_check_delivery() { val s = buying(); s.tab = Tab.ORDERS; s.page = Page.Check(order.copy(status = "SENT")); s.photos = listOf("BILL" to ByteArray(1))
         s.bill = BillRead(true, listOf(BillLine("i1", "Paneer", 18, 340.0), BillLine("i2", "Amul Butter 500 g", 24, 285.0)), listOf(BillExtra("Delivery charge", 1.0)), listOf("i3"))
         shot("m37-check-delivery", s) }
+    private val thread = ChatThread("h1", "Demo Hotel 1", true, listOf(
+        Msg("m1", "REQUEST", "Demo Hotel 1 asks the warehouse for: 100 Soap, 40 Comb\n“Running low before the weekend”", false, "2026-11-16T03:00:00Z", "r1", false, "Priya Shah", "OPEN"),
+        Msg("m2", "TEXT", "Can it come before 4? Big check-in tonight.", false, "2026-11-16T03:02:00Z", null, false, "Priya Shah"),
+        Msg("m3", "TEXT", "Yes, packing now.", false, "2026-11-16T03:05:00Z", null, true, "Ramesh"),
+        Msg("m4", "DELIVERY", "Delivery from Demo Dairy added to stock.\n• 2 Paneer still to come\n• Paneer billed at 340, order said 320", true, "2026-11-16T04:10:00Z", "d1", false, "Ramesh")))
+    @Test fun m42_inbox() {
+        val s = buying(); s.tab = Tab.INBOX
+        s.inbox = Inbox(3, listOf(ThreadRow("h1", "Demo Hotel 1", "HOTEL", 2, LastMsg("Can it come before 4? Big check-in tonight.", "TEXT", false, "2026-11-16T03:02:00Z", "Priya Shah")),
+            ThreadRow("wh", "Central Warehouse", "WAREHOUSE", 1, LastMsg("Delivery from Demo Dairy added to stock.", "DELIVERY", true, "2026-11-16T04:10:00Z", "Ramesh")),
+            ThreadRow("h2", "Demo Hotel 2", "HOTEL", 0, LastMsg("The warehouse sent it (T-121).", "REQUEST_SENT", false, "2026-11-15T09:00:00Z", "Ramesh")), ThreadRow("h3", "Demo Hotel 3")))
+        shot("m42-inbox", s)
+    }
+    @Test fun m43_team_chat() { val s = buying(); s.tab = Tab.INBOX; s.page = Page.Chat(thread); shot("m43-team-chat", s) }
     @Test fun m41_add_item() {
         val s = buying(); s.tab = Tab.STOCK; s.page = Page.AddItem
         s.webOptions = listOf(WebOption("Amul Cheese Slices 200 g", "Amul", "200 g", "PKT", 145.0), WebOption("Amul Processed Cheese Block 1 kg", "Amul", "1 kg", "KG", 560.0), WebOption("Amul Cheese Cubes 200 g", "Amul", "200 g", "PKT", 135.0))

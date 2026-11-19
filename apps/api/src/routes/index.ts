@@ -23,6 +23,7 @@ import { createRequest, declineRequest, deleteSchedule, dispatchRequest, listReq
 import { interpret, myVoiceAttempts, voiceHealth, voiceUsage } from '../voice/service.ts';
 import type { VoiceProvider } from '../voice/provider.ts';
 import { lookupItem, readBill } from '../services/assist.ts';
+import { inbox, listMessages, noteDelivery, noteOrderSent, noteRequest, postMessage } from '../services/messages.ts';
 
 interface Deps { db: Db; cfg: Config; provider: VoiceProvider | null }
 
@@ -370,14 +371,14 @@ export async function registerRoutes(app: FastifyInstance, { db, cfg, provider }
   app.get('/orders/:id', async (req) => getOrder(db, requireActor(req), pid(req)));
   app.patch('/orders/:id', async (req) => updateOrder(db, requireActor(req), pid(req),
     parse(z.object({ lines: z.array(OrderLine).min(1).max(200).optional(), supplierId: uuid.optional(), note: z.string().max(500).nullish(), expectedDate: day.nullish() }), req.body)));
-  app.post('/orders/:id/send', async (req) => sendOrder(db, requireActor(req), pid(req)));
+  app.post('/orders/:id/send', async (req) => { const a = requireActor(req); const out = await sendOrder(db, a, pid(req)); await noteOrderSent(db, a, pid(req)); return out; });
   app.post('/orders/:id/cancel', async (req) => cancelOrder(db, requireActor(req), pid(req)));
   const DeliveryLine = z.object({ productId: uuid, received: z.number().int().min(0).max(1_000_000), rejected: z.number().int().min(0).max(1_000_000).optional(),
     rejectReason: z.string().max(80).nullish(), unitPrice: z.number().nonnegative().nullish(), expiryDate: day.nullish() });
   const DeliveryBody = z.object({ lines: z.array(DeliveryLine).min(1).max(200), billTotal: z.number().nonnegative().nullish(), note: z.string().max(500).nullish(), checkedBy: z.enum(['COUNT', 'BILL_PHOTO']).optional() });
-  app.post('/orders/:id/deliveries', async (req, reply) => send(reply, await receiveDelivery(db, requireActor(req), { ...parse(DeliveryBody, req.body), orderId: pid(req) }, idem(req))));
+  app.post('/orders/:id/deliveries', async (req, reply) => { const a = requireActor(req); const out = await receiveDelivery(db, a, { ...parse(DeliveryBody, req.body), orderId: pid(req) }, idem(req)); await noteDelivery(db, a, out.body as any); return send(reply, out); });
   // A delivery with no order behind it (a hotel buying direct, or goods that simply turned up).
-  app.post('/deliveries', async (req, reply) => send(reply, await receiveDelivery(db, requireActor(req), parse(DeliveryBody.extend({ siteId: uuid, supplierId: uuid }), req.body), idem(req))));
+  app.post('/deliveries', async (req, reply) => { const a = requireActor(req); const out = await receiveDelivery(db, a, parse(DeliveryBody.extend({ siteId: uuid, supplierId: uuid }), req.body), idem(req)); await noteDelivery(db, a, out.body as any); return send(reply, out); });
   app.post('/deliveries/:id/photos', async (req, reply) => {
     const a = requireActor(req);
     if (!req.isMultipart()) throw err('INVALID_INPUT', 'multipart/form-data expected');
@@ -404,11 +405,18 @@ export async function registerRoutes(app: FastifyInstance, { db, cfg, provider }
     return reply.header('content-type', ph.contentType).header('cache-control', 'private, max-age=86400').send(ph.data);
   });
 
+  // ---- Team chat: one thread per site, with cards the app writes itself ----
+  app.get('/inbox', async (req) => inbox(db, requireActor(req)));
+  app.get('/sites/:id/messages', async (req) => listMessages(db, requireActor(req), pid(req), Q(req).limit ? Number(Q(req).limit) : undefined));
+  app.post('/sites/:id/messages', async (req, reply) => reply.code(201).send(await postMessage(db, requireActor(req), pid(req), parse(z.object({ body: z.string().min(1).max(1000) }), req.body).body)));
+
   // ---- Requests to the warehouse ----
   const RequestBody = z.object({ hotelId: uuid, lines: z.array(z.object({ productId: uuid, quantity: z.number().int().positive() })).min(1), note: z.string().max(500).nullish() });
   app.post('/requests', async (req, reply) => {
     const a = requireActor(req);
-    return send(reply, await createRequest(db, a, parse(RequestBody, req.body)));
+    const made = await createRequest(db, a, parse(RequestBody, req.body));
+    await noteRequest(db, a, (made.body as any).requestId, 'REQUEST');
+    return send(reply, made);
   });
   app.get('/requests', async (req) => {
     const a = requireActor(req);
@@ -430,12 +438,16 @@ export async function registerRoutes(app: FastifyInstance, { db, cfg, provider }
     const a = requireActor(req);
     const key = idem(req);
     const body = parse(z.object({ lines: z.array(z.object({ productId: uuid, quantity: z.number().int().nonnegative() })).optional(), note: z.string().max(500).nullish() }), req.body ?? {});
-    return send(reply, await dispatchRequest(db, a, parse(uuid, (req.params as any).id), body, key));
+    const sent = await dispatchRequest(db, a, parse(uuid, (req.params as any).id), body, key);
+    await noteRequest(db, a, parse(uuid, (req.params as any).id), 'REQUEST_SENT');
+    return send(reply, sent);
   });
   app.post('/requests/:id/decline', async (req) => {
     const a = requireActor(req);
     const body = parse(z.object({ note: z.string().max(500).nullish() }), req.body ?? {});
-    return declineRequest(db, a, parse(uuid, (req.params as any).id), body.note);
+    const no = await declineRequest(db, a, parse(uuid, (req.params as any).id), body.note);
+    await noteRequest(db, a, parse(uuid, (req.params as any).id), 'REQUEST_DECLINED');
+    return no;
   });
   app.get('/request-schedules', async (req) => {
     const a = requireActor(req);

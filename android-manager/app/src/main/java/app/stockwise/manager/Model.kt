@@ -89,10 +89,16 @@ import kotlinx.serialization.json.JsonElement
 @Serializable data class BillRead(val read: Boolean = false, val lines: List<BillLine> = emptyList(), val extras: List<BillExtra> = emptyList(), val missing: List<String> = emptyList(), val billTotal: Double? = null)
 @Serializable data class WebOption(val name: String, val brand: String? = null, val pack: String? = null, val unit: String = "PCS", val approxPrice: Double? = null)
 @Serializable data class Lookup(val available: Boolean = true, val options: List<WebOption> = emptyList())
+// Team chat: one thread per site, with cards the app writes itself (a request, an order sent, a delivery checked).
+@Serializable data class LastMsg(val body: String = "", val kind: String = "TEXT", val flagged: Boolean = false, val createdAt: String? = null, val author: String? = null)
+@Serializable data class ThreadRow(val siteId: String, val siteName: String, val kind: String = "HOTEL", val unread: Int = 0, val last: LastMsg? = null)
+@Serializable data class Inbox(val unread: Int = 0, val threads: List<ThreadRow> = emptyList())
+@Serializable data class Msg(val id: String, val kind: String = "TEXT", val body: String = "", val flagged: Boolean = false, val createdAt: String? = null, val refId: String? = null, val mine: Boolean = false, val author: String? = null, val refStatus: String? = null)
+@Serializable data class ChatThread(val siteId: String, val siteName: String = "", val canSend: Boolean = false, val messages: List<Msg> = emptyList())
 @Serializable data class Created(val id: String, val number: Int? = null, val existed: Boolean = false)
 
 // App state shapes
-enum class Tab { TODAY, COUNT, STOCK, DELIVERIES, ACTIVITY, ATTEMPTS, SUPPLIERS, ORDERS }
+enum class Tab { TODAY, COUNT, STOCK, DELIVERIES, ACTIVITY, ATTEMPTS, SUPPLIERS, ORDERS, INBOX }
 /** One line of an order being written: what the store has, what would fill it up, what was ordered last time, and the quantity typed. */
 data class FormLine(val productId: String, val name: String, val unit: String = "", val store: Int = 0, val fill: Int = 0, val last: Int? = null, val qty: Int = 0)
 /** A screen opened on top of a tab (back returns to the tab). */
@@ -104,6 +110,7 @@ sealed class Page {
     data class Message(val order: Order) : Page()
     data class Check(val order: Order) : Page()
     object AddItem : Page()
+    data class Chat(val thread: ChatThread) : Page()
 }
 data class Notice(val text: String, val warn: Boolean = true)
 enum class Role { ME, APP }

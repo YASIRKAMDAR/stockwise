@@ -68,6 +68,10 @@ class EndToEndTest {
     private val orderRow = """{"id":"o1","number":7,"status":"SENT","supplier":{"id":"s1","name":"Demo Dairy"},"items":1,"names":"Paneer","total":6400.0}"""
     private val supplierJson = """{"id":"s1","name":"Demo Dairy","phone":"98250 00001","onWhatsapp":true,"deliveryDays":1,"favourite":false,"orders":3,"boughtBefore":true,
         "categories":[{"id":"c1","name":"Food","allItems":true,"picked":0,"orders":3,"boughtBefore":true}],"recentOrders":[],"boughtMost":[]}"""
+    private var chatStatus = "OPEN"
+    private var chatExtra = ""
+    private fun chatJson() = """{"siteId":"h1","siteName":"Demo Hotel 1","canSend":true,"messages":[
+        {"id":"m1","kind":"REQUEST","body":"Demo Hotel 1 asks the warehouse for: 48 Soap","createdAt":"2026-11-16T03:00:00Z","refId":"r1","mine":false,"author":"Priya Shah","refStatus":"$chatStatus"}$chatExtra]}"""
     @Before fun startServer() {
         server = MockWebServer()
         server.dispatcher = object : Dispatcher() {
@@ -83,7 +87,7 @@ class EndToEndTest {
                     p.startsWith("/requests/top-up") -> json("""{"warehouse":{"id":"wh","name":"Central Warehouse"},"lines":[{"productId":"p1","name":"Soap","par":48,"store":0,"onTheWay":0,"requested":0,"warehouse":900,"quantity":48},{"productId":"p2","name":"Shampoo","par":60,"store":86,"onTheWay":0,"requested":0,"warehouse":470,"quantity":0}]}""")
                     p.endsWith("/requests") && request.method == "POST" -> { requestsJson = openRequest; json("""{"requestId":"r1","status":"OPEN"}""", 201) }
                     p.startsWith("/requests?") -> json(requestsJson)
-                    p.endsWith("/requests/r1/dispatch") && request.method == "POST" -> { requestsJson = "[]"; json("""{"transferId":"t9","refCode":"T9","status":"IN_TRANSIT"}""", 201) }
+                    p.endsWith("/requests/r1/dispatch") && request.method == "POST" -> { requestsJson = "[]"; chatStatus = "SENT"; json("""{"transferId":"t9","refCode":"T9","status":"IN_TRANSIT"}""", 201) }
                     p.startsWith("/request-schedules") -> json("[]")
                     p.endsWith("/products") -> json("""[{"id":"p1","sku":"SOAP","name":"Soap","unit":"pcs","icon":"🧼"},{"id":"p2","sku":"SHAMPOO","name":"Shampoo","unit":"pcs","icon":"🧴"}]""")
                     p.contains("/hotels/h1/stock") -> json("""{"items":[{"productId":"p1","name":"Soap","store":0,"staffHeld":14,"reorderThreshold":24,"low":true,"out":true},{"productId":"p2","name":"Shampoo","store":86,"reorderThreshold":30}]}""")
@@ -112,6 +116,9 @@ class EndToEndTest {
                     p.endsWith("/transfers/t1/receipts") && request.method == "POST" -> json("""{"ok":true}""", 201)
                     p.startsWith("/transactions") -> json("""{"items":[]}""")
                     p.startsWith("/me/voice-attempts") -> json("""{"attempts":[]}""")
+                    p == "/inbox" -> json("""{"unread":1,"threads":[{"siteId":"h1","siteName":"Demo Hotel 1","kind":"HOTEL","unread":1,"last":{"body":"Demo Hotel 1 asks the warehouse for: 48 Soap","kind":"REQUEST","createdAt":"2026-11-16T03:00:00Z","author":"Priya Shah"}}]}""")
+                    p == "/sites/h1/messages" && request.method == "POST" -> { chatExtra = "," + """{"id":"m2","kind":"TEXT","body":"Sending in the afternoon","createdAt":"2026-11-16T03:05:00Z","mine":true,"author":"Priya Shah"}"""; json("""{"id":"m2"}""", 201) }
+                    p == "/sites/h1/messages" -> json(chatJson())
                     p.startsWith("/sites/") -> json("""{"isWarehouse":true,"deliveriesDue":[${if (orderStatus == "SENT") orderRow else ""}],"drafts":[],"low":[],"useFirst":[]}""")
                     p.startsWith("/catalog/categories") -> json("""[{"id":"c1","name":"Food & Beverage","shortName":"Food","items":3}]""")
                     p == "/suppliers/s1" -> json(supplierJson)
@@ -254,6 +261,26 @@ class EndToEndTest {
         assertEquals("POST", d.method)
         assertTrue(d.getHeader("idempotency-key") != null)
         waitFor(s, "request gone", 10_000) { s.openRequests.isEmpty() }
+    }
+
+    /** Team chat at the warehouse: the hotel's request is a card with buttons; a reply is typed in the same place. */
+    @Test fun chat_request_card_and_reply() {
+        val s = state().also { it.store.hotelId = "wh"; it.hotelId = "wh" }
+        signIn(s)
+        waitFor(s, "inbox loaded", 10_000) { s.inbox?.unread == 1 }
+        s.go(Tab.INBOX); pump(); rule.waitForIdle()
+        rule.onNodeWithText("Demo Hotel 1").performClick(); pump()
+        waitFor(s, "thread open", 10_000) { s.page is Page.Chat }
+        rule.waitForIdle()
+        requestsJson = openRequest
+        rule.onNodeWithText("Pack and send").performClick(); pump()
+        waitFor(s, "sent from chat", 10_000) { received.any { it.path == "/requests/r1/dispatch" && it.method == "POST" } }
+        waitFor(s, "card updated", 10_000) { (s.page as? Page.Chat)?.thread?.messages?.firstOrNull()?.refStatus == "SENT" }
+        rule.onNodeWithContentDescription("Write a message").performTextInput("Sending in the afternoon")
+        rule.onNodeWithContentDescription("Send").performClick(); pump()
+        waitFor(s, "reply posted", 10_000) { (s.page as? Page.Chat)?.thread?.messages?.size == 2 }
+        val reply = received.last { it.path == "/sites/h1/messages" && it.method == "POST" }.body.readUtf8()
+        assertTrue(reply, reply.contains("\"body\":\"Sending in the afternoon\""))
     }
 
     /** Warehouse: order from a supplier (typed quantity), send on WhatsApp, check the delivery in, then the same order spoken in one sentence. */

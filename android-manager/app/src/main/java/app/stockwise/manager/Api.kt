@@ -117,6 +117,9 @@ class Api(private val store: Store, private val base: String = BuildConfig.API_B
     suspend fun draftOrder(siteId: String, text: String, supplierId: String? = null): OrderDraft = json.decodeFromString(OrderDraft.serializer(), post("/orders/draft-from-text", json.encodeToString(DraftAsk.serializer(), DraftAsk(siteId, text, supplierId))))
     suspend fun checkIn(orderId: String, lines: List<DeliveryLineBody>, key: String): DeliveryResult =
         json.decodeFromString(DeliveryResult.serializer(), post("/orders/$orderId/deliveries", json.encodeToString(DeliveryBody.serializer(), DeliveryBody(lines)), key))
+    suspend fun inbox(): Inbox = json.decodeFromString(Inbox.serializer(), raw("GET", "/inbox"))
+    suspend fun messages(siteId: String): ChatThread = json.decodeFromString(ChatThread.serializer(), raw("GET", "/sites/$siteId/messages"))
+    suspend fun postMessage(siteId: String, body: String) { post("/sites/$siteId/messages", json.encodeToString(MsgBody.serializer(), MsgBody(body))) }
     suspend fun readBill(orderId: String, jpeg: ByteArray): BillRead {
         val body = MultipartBody.Builder().setType(MultipartBody.FORM).addFormDataPart("photo", "bill.jpg", jpeg.toRequestBody("image/jpeg".toMediaType())).build()
         return json.decodeFromString(BillRead.serializer(), raw("POST", "/orders/$orderId/read-bill", body))
@@ -162,6 +165,7 @@ class Api(private val store: Store, private val base: String = BuildConfig.API_B
 @kotlinx.serialization.Serializable data class DispatchLine(val productId: String, val quantity: Int)
 @kotlinx.serialization.Serializable data class DispatchBody(val fromHotelId: String, val toHotelId: String, val lines: List<DispatchLine>)
 @kotlinx.serialization.Serializable data class ReasonBody(val reason: String)
+@kotlinx.serialization.Serializable data class MsgBody(val body: String)
 @kotlinx.serialization.Serializable data class NewItem(val name: String, val unit: String, val categoryId: String? = null)
 @kotlinx.serialization.Serializable data class SupplierBody(val name: String? = null, val phone: String? = null, val deliveryDays: Int? = null, val favourite: Boolean? = null, val categoryIds: List<String>? = null)
 @kotlinx.serialization.Serializable data class CategoryPick(val allItems: Boolean, val productIds: List<String>)

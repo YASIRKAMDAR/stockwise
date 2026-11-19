@@ -73,6 +73,8 @@ class AppState(ctx: Context, apiBase: String = BuildConfig.API_BASE) {
     /** Pack sizes found on the web while adding an item (null = not looked up yet). */
     var webOptions by mutableStateOf<List<WebOption>?>(null)
     var lookingUp by mutableStateOf(false)
+    /** Team chat: threads with what is new for this person. */
+    var inbox by mutableStateOf<Inbox?>(null)
     private var searchJob: Job? = null
 
     // Voice / conversation
@@ -138,6 +140,7 @@ class AppState(ctx: Context, apiBase: String = BuildConfig.API_BASE) {
             countStatus = runCatching { api.countStatus(h).firstOrNull() }.getOrNull()
             if (hasWarehouse) requests = runCatching { api.requests(h) }.getOrDefault(emptyList())
             home = runCatching { api.siteHome(h) }.getOrNull()
+            inbox = runCatching { api.inbox() }.getOrNull()
         } catch (e: Exception) { handle(e) }
     }
     fun refresh() = scope.launch { loadAll(); loadTab(tab) }
@@ -163,6 +166,7 @@ class AppState(ctx: Context, apiBase: String = BuildConfig.API_BASE) {
                 Tab.ATTEMPTS -> attempts = runCatching { api.voiceAttempts().attempts }.getOrDefault(emptyList())
                 Tab.SUPPLIERS -> { suppliers = api.suppliers(supplierQuery); loadCategories() }
                 Tab.ORDERS -> home = api.siteHome(h)
+                Tab.INBOX -> inbox = api.inbox()
             }
         } catch (e: Exception) { handle(e) }
     }
@@ -284,6 +288,26 @@ class AppState(ctx: Context, apiBase: String = BuildConfig.API_BASE) {
     fun confirmAsk(m: ChatMessage) {
         val b = m.body as? ChatBody.Ask ?: return
         askWarehouse(b.lines.associate { it.first.id to it.second }) { chat = chat.map { if (it.id == m.id) it.copy(body = b.copy(sent = true)) else it } }
+    }
+
+    // ---------- team chat ----------
+    private fun chatPage() = page as? Page.Chat
+    fun openThread(siteId: String) = scope.launch { try { page = Page.Chat(api.messages(siteId)); inbox = runCatching { api.inbox() }.getOrNull() } catch (e: Exception) { handle(e) } }
+    private suspend fun reloadThread() { val c = chatPage() ?: return; val fresh = api.messages(c.thread.siteId); if (chatPage()?.thread?.siteId == fresh.siteId) page = Page.Chat(fresh) }
+    fun sendMessage(text: String) = scope.launch {
+        val c = chatPage() ?: return@launch
+        if (text.isBlank()) return@launch
+        try { api.postMessage(c.thread.siteId, text.trim()); reloadThread() } catch (e: Exception) { handle(e) }
+    }
+    /** The buttons on a request card in the chat: the warehouse packs and sends it, or says no. */
+    fun chatSend(m: Msg) = scope.launch { val id = m.refId ?: return@launch; try { api.dispatchRequest(id, null, UUID.randomUUID().toString()); reloadThread(); loadAll() } catch (e: Exception) { handle(e) } }
+    fun chatDecline(m: Msg) = scope.launch { val id = m.refId ?: return@launch; try { api.declineRequest(id); reloadThread(); loadAll() } catch (e: Exception) { handle(e) } }
+    /** While the app is open, look for new messages once a minute. */
+    private val poll = scope.launch {
+        while (true) {
+            delay(60_000)
+            if (me != null) try { inbox = api.inbox(); reloadThread() } catch (e: ApiException) { } catch (e: OfflineException) { }
+        }
     }
 
     // ---------- suppliers ----------
@@ -513,6 +537,7 @@ class AppState(ctx: Context, apiBase: String = BuildConfig.API_BASE) {
     fun interpret(text: String, durationMs: Long, mic: Mic) = scope.launch {
         val h = hotelId ?: return@launch
         notice = null
+        if (chatPage() != null) { sendMessage(text); return@launch }
         form()?.let { busy = true; speakInto(it, text); busy = false; return@launch }
         post(ChatBody.Said(text, durationMs > 0), Role.ME)
         localCommand(text)?.let { applyLocal(it); return@launch }
@@ -523,6 +548,12 @@ class AppState(ctx: Context, apiBase: String = BuildConfig.API_BASE) {
     fun interpretAudio(audio: ByteArray, durationMs: Long, heard: String, mic: Mic) = scope.launch {
         val h = hotelId ?: return@launch
         notice = null
+        if (chatPage() != null) {
+            // A spoken message is sent as the words that were heard.
+            busy = true
+            try { sendMessage(api.interpretAudio(h, audio, lang, durationMs, heard).transcript.ifBlank { heard }) } catch (e: ApiException) { handle(e) } catch (e: OfflineException) { handle(e) }
+            busy = false; return@launch
+        }
         form()?.let { f ->
             busy = true
             try { speakInto(f, api.interpretAudio(h, audio, lang, durationMs, heard).transcript.ifBlank { heard }) } catch (e: ApiException) { handle(e) } catch (e: OfflineException) { handle(e) }

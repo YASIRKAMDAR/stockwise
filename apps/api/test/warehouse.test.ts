@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { bal, Client, ledgerMatchesBalances, multipart, pwClient, setupWorld, PW, type World } from './helpers.ts';
+import { bal, Client, ledgerMatchesBalances, multipart, pwClient, setupWorld, staffClient, PW, type World } from './helpers.ts';
 import { createHotel, createUser, systemActor } from '../src/db/fixtures.ts';
 import { createTransaction } from '../src/services/transactions.ts';
 import { runDueSchedules } from '../src/services/requests.ts';
@@ -134,5 +134,34 @@ describe('Warehouse', () => {
   it('cron endpoint needs the secret', async () => {
     const c = new Client(w.app);
     expect((await c.req('POST', '/internal/run-schedules', {}, { key: null })).status).toBe(401);
+  });
+});
+
+describe('Team chat', () => {
+  it('a request becomes a card in the hotel thread; the warehouse sees it, replies, and sending it adds a second card', async () => {
+    const r = await mgr3.post('/requests', { hotelId: w.h[2], lines: [{ productId: w.p.SOAP, quantity: 5 }], note: 'for the weekend' });
+    expect(r.status).toBe(201);
+    const box = (await whm.get('/inbox')).body;
+    const th = box.threads.find((t: any) => t.siteId === w.h[2]);
+    expect(th.unread).toBeGreaterThan(0);
+    expect(th.last.body).toContain('asks the warehouse for: 5 Soap');
+    const chat = (await whm.get(`/sites/${w.h[2]}/messages`)).body;
+    expect(chat.canSend).toBe(true);
+    const cardMsg = chat.messages.at(-1);
+    expect(cardMsg).toMatchObject({ kind: 'REQUEST', refId: r.body.requestId, refStatus: 'OPEN', mine: false });
+    expect((await whm.get('/inbox')).body.threads.find((t: any) => t.siteId === w.h[2]).unread).toBe(0);   // opening it marks it read
+    expect((await whm.post(`/sites/${w.h[2]}/messages`, { body: 'Sending in the afternoon' })).status).toBe(201);
+    expect((await mgr3.get('/inbox')).body.unread).toBeGreaterThan(0);
+    expect((await whm.post(`/requests/${r.body.requestId}/dispatch`, {})).status).toBe(201);
+    const after = (await mgr3.get(`/sites/${w.h[2]}/messages`)).body;
+    expect(after.canSend).toBe(false);
+    expect(after.messages.map((m: any) => m.kind).slice(-3)).toEqual(['REQUEST', 'TEXT', 'REQUEST_SENT']);
+    expect(after.messages.findLast((m: any) => m.kind === 'REQUEST').refStatus).toBe('SENT');
+  });
+  it('a hotel manager cannot read another hotel\'s thread, and staff have no chat', async () => {
+    expect((await mgr3.get(`/sites/${w.h[1]}/messages`)).status).toBe(403);
+    const staff = await staffClient(w, 'S1A', 0);
+    expect((await staff.get('/inbox')).body.threads).toEqual([]);
+    expect((await staff.post(`/sites/${w.h[0]}/messages`, { body: 'hi' })).status).toBe(403);
   });
 });
