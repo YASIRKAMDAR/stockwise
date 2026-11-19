@@ -104,4 +104,62 @@ class ScreensTest {
         s.chat = listOf(ChatMessage(Role.ME, ChatBody.Said("warehouse se 50 sabun mangwao", true, "hi")), ChatMessage(Role.APP, ChatBody.Ask(listOf(s.products[0] to 50))))
         shot("m24-ask-card", s)
     }
+
+    // ---- Buying: suppliers, orders, deliveries ----
+    private val dairy = Supplier(id = "s1", name = "Demo Dairy", phone = "98250 00001", favourite = true, orders = 12, boughtBefore = true,
+        categories = listOf(SupplierCat("c1", "Food", allItems = false, picked = 4, orders = 12, boughtBefore = true)),
+        recentOrders = listOf(SupplierOrder("o7", 7, "SENT", "Butter, Milk, Paneer", 9120.0, "2026-11-18T05:00:00Z"), SupplierOrder("o5", 5, "RECEIVED", "Curd, Paneer", 4300.0, "2026-11-12T05:00:00Z")),
+        boughtMost = listOf(BoughtItem("i1", "Paneer", "KG", 11, 320.0), BoughtItem("i2", "Amul Butter 500 g", "PKT", 9, 285.0), BoughtItem("i3", "Milk full cream", "LTR", 8, 66.0)))
+    private fun buying(): AppState {
+        val s = state()
+        s.hotelId = "wh"; s.alerts = emptyList(); s.corrections = emptyList(); s.requests = emptyList()
+        s.categories = listOf(Category("c1", "Food & Beverage", "Food", 610), Category("c2", "Housekeeping", "Cleaning", 140), Category("c3", "Fruits & Vegetables", "Fruit & vegetables", 95), Category("c4", "Engineering", "Repairs & spares", 210))
+        s.suppliers = listOf(dairy,
+            Supplier("s2", "Demo Provisions", "98250 00002", orders = 8, boughtBefore = true, categories = listOf(SupplierCat("c1", "Food"), SupplierCat("c3", "Fruit & vegetables"))),
+            Supplier("s3", "Demo Cleaning Supplies", "98250 00003", orders = 3, boughtBefore = true, categories = listOf(SupplierCat("c2", "Cleaning"))),
+            Supplier("s4", "Patel Vegetables", "98250 00004", categories = listOf(SupplierCat("c3", "Fruit & vegetables"))),
+            Supplier("s5", "Shree Hardware", null, categories = listOf(SupplierCat("c4", "Repairs & spares"))))
+        s.home = SiteHome(isWarehouse = true,
+            deliveriesDue = listOf(OrderSummary("o7", 7, "SENT", "2026-11-21", NamedRef("s1", "Demo Dairy"), 3, "Butter, Milk, Paneer", 9120.0)),
+            drafts = listOf(OrderSummary("o8", 8, "DRAFT", null, NamedRef("s3", "Demo Cleaning Supplies"), 2, "Floor cleaner, Phenyl", 0.0)),
+            low = listOf(LowItem("i1", "Paneer", "KG", 4, 10), LowItem("i5", "Basmati rice", "KG", 20, 50)),
+            useFirst = listOf(UseFirstItem("i4", "Curd", "KG", 6, 2)))
+        return s
+    }
+    private val order = Order("o7", 7, "DRAFT", "Central Warehouse", OrderSupplier("s1", "Demo Dairy", "98250 00001"), "2026-11-21",
+        listOf(OrderLine("i1", "Paneer", "KG", true, 20, 0, 4, 320.0, 320.0), OrderLine("i2", "Amul Butter 500 g", "PKT", true, 24, 0, 6, 285.0, 285.0), OrderLine("i3", "Milk full cream", "LTR", true, 40, 0, 10, 66.0, 66.0)), 15880.0,
+        "Hello, order from Central Warehouse:\n\n1. Amul Butter 500 g — 24 PKT\n2. Milk full cream — 40 LTR\n3. Paneer — 20 KG\n\nPlease deliver by Saturday 21 Nov.\nOrder 7. Thank you.")
+    @Test fun m30_warehouse_feed() { shot("m30-warehouse-feed", buying()) }
+    @Test fun m31_suppliers() { val s = buying(); s.tab = Tab.SUPPLIERS; shot("m31-suppliers", s) }
+    @Test fun m32_supplier_card() { val s = buying(); s.tab = Tab.SUPPLIERS; s.page = Page.SupplierCard(dairy); shot("m32-supplier-card", s) }
+    @Test fun m33_supplier_add() { val s = buying(); s.tab = Tab.SUPPLIERS; s.page = Page.SupplierAdd; shot("m33-supplier-add", s) }
+    @Test fun m34_supplier_items() {
+        val s = buying(); s.tab = Tab.SUPPLIERS
+        s.page = Page.SupplierItems(dairy, dairy.categories[0], listOf(PickItem("i1", "Paneer", "KG", true, true, 11), PickItem("i2", "Amul Butter 500 g", "PKT", true, true, 9), PickItem("i3", "Milk full cream", "LTR", true, true, 8), PickItem("i4", "Curd", "KG", true), PickItem("i6", "Cheese slices", "PKT"), PickItem("i7", "Ghee 1 L", "BTL")))
+        shot("m34-supplier-items", s)
+    }
+    @Test fun m35_order() {
+        val s = buying(); s.tab = Tab.ORDERS
+        s.page = Page.OrderForm(NamedRef("s1", "Demo Dairy"), listOf(FormLine("i1", "Paneer", "KG", 4, 20, 20, 20), FormLine("i2", "Amul Butter 500 g", "PKT", 6, 24, 24, 24), FormLine("i3", "Milk full cream", "LTR", 10, 40, 40, 100), FormLine("i4", "Curd", "KG", 6, 0, 10, 0)))
+        shot("m35-order", s)
+    }
+    @Test fun m36_order_message() { val s = buying(); s.tab = Tab.ORDERS; s.page = Page.Message(order); shot("m36-order-message", s) }
+    @Test fun m37_check_delivery() { val s = buying(); s.tab = Tab.ORDERS; s.page = Page.Check(order.copy(status = "SENT")); s.photos = listOf("BILL" to ByteArray(1)); shot("m37-check-delivery", s) }
+    @Test fun m38_orders() { val s = buying(); s.tab = Tab.ORDERS; shot("m38-orders", s) }
+    @Test fun m39_warehouse_stock() {
+        val s = buying(); s.tab = Tab.STOCK
+        s.items = listOf(CatalogItem("i1", "F001", "Paneer", "KG", store = 4, min = 10, par = 24, status = "LOW", supplier = SupplierTag("s1", "Demo Dairy", 1)),
+            CatalogItem("i4", "F004", "Curd", "KG", store = 6, status = "USE_FIRST", useFirst = UseFirst("2026-11-22", 6), supplier = SupplierTag("s1", "Demo Dairy")),
+            CatalogItem("i2", "F002", "Amul Butter 500 g", "PKT", store = 30, status = "OK", supplier = SupplierTag("s1", "Demo Dairy")),
+            CatalogItem("i5", "F005", "Basmati rice", "KG", store = 120, status = "OK", supplier = SupplierTag("s2", "Demo Provisions", 2)),
+            CatalogItem("i8", "H001", "Floor cleaner 5 L", "CAN", store = 14, status = "OK", supplier = SupplierTag("s3", "Demo Cleaning Supplies")))
+        shot("m39-warehouse-stock", s)
+    }
+    @Test fun m40_spoken_order() {
+        val s = buying()
+        val m = { id: String, name: String, unit: String -> DraftMatch(id, name, unit, 100.0) }
+        s.chat = listOf(ChatMessage(Role.ME, ChatBody.Said("Demo Dairy ko order karo, 20 kilo paneer, 24 butter aur dahi", true, "mixed")),
+            ChatMessage(Role.APP, ChatBody.Draft(OrderDraft("", NamedRef("s1", "Demo Dairy"), listOf(DraftLine("paneer", 20, m("i1", "Paneer", "KG")), DraftLine("butter", 24, m("i2", "Amul Butter 500 g", "PKT")), DraftLine("dahi", null, m("i4", "Curd", "KG"), unsure = true)), 0.0, false))))
+        shot("m40-spoken-order", s)
+    }
 }

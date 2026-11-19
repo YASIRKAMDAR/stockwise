@@ -18,7 +18,7 @@ import java.util.concurrent.TimeUnit
 class ApiException(val status: Int, val code: String, override val message: String) : Exception(message)
 class OfflineException : IOException("No connection")
 
-val json = Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = false }
+val json = Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = false; coerceInputValues = true }
 
 /** Talks to the same Stockwise server as the website. The session cookie is kept in encrypted storage. */
 class Api(private val store: Store, private val base: String = BuildConfig.API_BASE) {
@@ -92,6 +92,36 @@ class Api(private val store: Store, private val base: String = BuildConfig.API_B
     suspend fun addSchedule(hotelId: String, weekday: Int, hour: Int) { post("/request-schedules", json.encodeToString(ScheduleBody.serializer(), ScheduleBody(hotelId, weekday, hour))) }
     suspend fun deleteSchedule(id: String) { raw("DELETE", "/request-schedules/$id") }
 
+    // Catalog, suppliers, orders to suppliers, deliveries
+    private fun enc(v: String) = java.net.URLEncoder.encode(v, "UTF-8")
+    suspend fun categories(): List<Category> = json.decodeFromString(raw("GET", "/catalog/categories"))
+    suspend fun items(siteId: String, q: String = "", filter: String? = null): ItemsPage =
+        json.decodeFromString(ItemsPage.serializer(), raw("GET", "/catalog/items?siteId=$siteId&limit=60" + (if (q.isNotBlank()) "&q=" + enc(q) else "") + (filter?.let { "&filter=$it" } ?: "")))
+    suspend fun createItem(name: String, unit: String, categoryId: String?): Created =
+        json.decodeFromString(Created.serializer(), post("/catalog/items", json.encodeToString(NewItem.serializer(), NewItem(name, unit, categoryId))))
+    suspend fun suppliers(q: String = ""): List<Supplier> = json.decodeFromString(raw("GET", "/suppliers" + if (q.isNotBlank()) "?q=" + enc(q) else ""))
+    suspend fun supplier(id: String): Supplier = json.decodeFromString(Supplier.serializer(), raw("GET", "/suppliers/$id"))
+    suspend fun createSupplier(b: SupplierBody): Created = json.decodeFromString(Created.serializer(), post("/suppliers", json.encodeToString(SupplierBody.serializer(), b)))
+    suspend fun patchSupplier(id: String, b: SupplierBody) { raw("PATCH", "/suppliers/$id", json.encodeToString(SupplierBody.serializer(), b).toRequestBody(jsonType)) }
+    suspend fun supplierItems(id: String, categoryId: String): List<PickItem> = json.decodeFromString(raw("GET", "/suppliers/$id/categories/$categoryId/items"))
+    suspend fun setSupplierCategory(id: String, categoryId: String, allItems: Boolean, productIds: List<String>) {
+        raw("PUT", "/suppliers/$id/categories/$categoryId", json.encodeToString(CategoryPick.serializer(), CategoryPick(allItems, productIds)).toRequestBody(jsonType))
+    }
+    suspend fun siteHome(siteId: String): SiteHome = json.decodeFromString(SiteHome.serializer(), raw("GET", "/sites/$siteId/home"))
+    suspend fun suggest(siteId: String, supplierId: String?): List<Suggestion> = json.decodeFromString(raw("GET", "/orders/suggest?siteId=$siteId" + (supplierId?.let { "&supplierId=$it" } ?: "")))
+    suspend fun createOrder(siteId: String, supplierId: String, lines: List<DispatchLine>, source: String): Created =
+        json.decodeFromString(Created.serializer(), post("/orders", json.encodeToString(NewOrder.serializer(), NewOrder(siteId, supplierId, lines, source))))
+    suspend fun patchOrder(id: String, supplierId: String, lines: List<DispatchLine>) { raw("PATCH", "/orders/$id", json.encodeToString(OrderPatch.serializer(), OrderPatch(lines, supplierId)).toRequestBody(jsonType)) }
+    suspend fun order(id: String): Order = json.decodeFromString(Order.serializer(), raw("GET", "/orders/$id"))
+    suspend fun sendOrder(id: String): Order = json.decodeFromString(Order.serializer(), post("/orders/$id/send", "{}"))
+    suspend fun draftOrder(siteId: String, text: String, supplierId: String? = null): OrderDraft = json.decodeFromString(OrderDraft.serializer(), post("/orders/draft-from-text", json.encodeToString(DraftAsk.serializer(), DraftAsk(siteId, text, supplierId))))
+    suspend fun checkIn(orderId: String, lines: List<DeliveryLineBody>, key: String): DeliveryResult =
+        json.decodeFromString(DeliveryResult.serializer(), post("/orders/$orderId/deliveries", json.encodeToString(DeliveryBody.serializer(), DeliveryBody(lines)), key))
+    suspend fun uploadPhoto(deliveryId: String, kind: String, jpeg: ByteArray) {
+        val body = MultipartBody.Builder().setType(MultipartBody.FORM).addFormDataPart("kind", kind).addFormDataPart("photo", "photo.jpg", jpeg.toRequestBody("image/jpeg".toMediaType())).build()
+        raw("POST", "/deliveries/$deliveryId/photos", body)
+    }
+
     // Activity
     suspend fun reverse(eventId: String, reason: String, key: String) { post("/transactions/$eventId/reversal", json.encodeToString(ReasonBody.serializer(), ReasonBody(reason)), key) }
     suspend fun dismissCorrection(id: String) { post("/correction-requests/$id/dismiss", "{}") }
@@ -127,6 +157,14 @@ class Api(private val store: Store, private val base: String = BuildConfig.API_B
 @kotlinx.serialization.Serializable data class DispatchLine(val productId: String, val quantity: Int)
 @kotlinx.serialization.Serializable data class DispatchBody(val fromHotelId: String, val toHotelId: String, val lines: List<DispatchLine>)
 @kotlinx.serialization.Serializable data class ReasonBody(val reason: String)
+@kotlinx.serialization.Serializable data class NewItem(val name: String, val unit: String, val categoryId: String? = null)
+@kotlinx.serialization.Serializable data class SupplierBody(val name: String? = null, val phone: String? = null, val deliveryDays: Int? = null, val favourite: Boolean? = null, val categoryIds: List<String>? = null)
+@kotlinx.serialization.Serializable data class CategoryPick(val allItems: Boolean, val productIds: List<String>)
+@kotlinx.serialization.Serializable data class NewOrder(val siteId: String, val supplierId: String, val lines: List<DispatchLine>, val source: String)
+@kotlinx.serialization.Serializable data class OrderPatch(val lines: List<DispatchLine>, val supplierId: String)
+@kotlinx.serialization.Serializable data class DraftAsk(val siteId: String, val text: String, val supplierId: String? = null)
+@kotlinx.serialization.Serializable data class DeliveryLineBody(val productId: String, val received: Int, val rejected: Int = 0, val rejectReason: String? = null, val unitPrice: Double? = null, val expiryDate: String? = null)
+@kotlinx.serialization.Serializable data class DeliveryBody(val lines: List<DeliveryLineBody>)
 @kotlinx.serialization.Serializable data class AskBody(val hotelId: String, val lines: List<DispatchLine>, val note: String? = null)
 @kotlinx.serialization.Serializable data class DispatchRequestBody(val lines: List<DispatchLine>? = null)
 @kotlinx.serialization.Serializable data class NoteBody(val note: String? = null)

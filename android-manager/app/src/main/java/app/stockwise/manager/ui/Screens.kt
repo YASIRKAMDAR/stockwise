@@ -24,6 +24,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.activity.compose.BackHandler
 import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.TouchApp
@@ -142,6 +146,8 @@ fun Shell(s: AppState, mic: Mic, drawerOpen: Boolean = false) {
             item(t.count, Icons.Filled.FactCheck, Tab.COUNT)
             item(t.stock, Icons.Filled.Inventory2, Tab.STOCK)
             item(t.deliveries, Icons.Filled.LocalShipping, Tab.DELIVERIES)
+            item(t.orders, Icons.Filled.ShoppingCart, Tab.ORDERS)
+            item(t.suppliers, Icons.Filled.People, Tab.SUPPLIERS)
             item(t.activity, Icons.Filled.History, Tab.ACTIVITY)
             HorizontalDivider(color = C.Line, modifier = Modifier.padding(vertical = 8.dp))
             if (s.hotels.size > 1) {
@@ -162,33 +168,40 @@ fun Shell(s: AppState, mic: Mic, drawerOpen: Boolean = false) {
     }) {
         Column(Modifier.fillMaxSize().background(C.Linen).systemBarsPadding().imePadding()) {
             Row(Modifier.fillMaxWidth().background(C.Paper).padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(46.dp).clip(RoundedCornerShape(12.dp)).border(1.5.dp, C.Line, RoundedCornerShape(12.dp)).clickable { scope.launch { drawer.open() } }, contentAlignment = Alignment.Center) {
-                    Icon(Icons.Filled.Menu, "Menu", tint = C.Ink)
+                val page = s.page
+                Box(Modifier.size(46.dp).clip(RoundedCornerShape(12.dp)).border(1.5.dp, C.Line, RoundedCornerShape(12.dp)).clickable { if (page != null) s.back() else scope.launch { drawer.open() } }, contentAlignment = Alignment.Center) {
+                    if (page != null) Icon(Icons.AutoMirrored.Filled.ArrowBack, t.back, tint = C.Ink) else Icon(Icons.Filled.Menu, "Menu", tint = C.Ink)
                 }
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    val title = when (s.tab) { Tab.TODAY -> t.today; Tab.COUNT -> t.count; Tab.STOCK -> t.stock; Tab.DELIVERIES -> t.deliveries; Tab.ACTIVITY -> t.activity; Tab.ATTEMPTS -> t.voiceAttempts }
-                    Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 1)
+                    val title = when (s.tab) { Tab.TODAY -> t.today; Tab.COUNT -> t.count; Tab.STOCK -> t.stock; Tab.DELIVERIES -> t.deliveries; Tab.ACTIVITY -> t.activity; Tab.ATTEMPTS -> t.voiceAttempts; Tab.SUPPLIERS -> t.suppliers; Tab.ORDERS -> t.orders }
+                    Text(if (page != null) pageTitle(t, page) else title, style = MaterialTheme.typography.titleMedium, maxLines = 1)
                     Text(s.hotel?.name ?: "", style = MaterialTheme.typography.bodyMedium, fontSize = 13.sp, maxLines = 1)
                 }
                 if (!mic.online) Tag("offline", C.Brick, Color(0xFFFBE9E5))
             }
             HorizontalDivider(color = C.Line)
             Box(Modifier.weight(1f)) {
+                val open = s.page
                 when {
+                    open != null -> PageScreen(s, open)
                     s.chat.isNotEmpty() && s.tab != Tab.COUNT -> ChatScreen(s)
                     s.tab == Tab.TODAY -> TodayScreen(s)
                     s.tab == Tab.COUNT -> CountScreen(s, mic)
-                    s.tab == Tab.STOCK -> StockScreen(s)
+                    s.tab == Tab.STOCK -> if (s.isWarehouse) CatalogStockScreen(s) else StockScreen(s)
+                    s.tab == Tab.SUPPLIERS -> SuppliersScreen(s)
+                    s.tab == Tab.ORDERS -> OrdersScreen(s)
                     s.tab == Tab.DELIVERIES -> DeliveriesScreen(s)
                     s.tab == Tab.ACTIVITY -> ActivityScreen(s)
                     else -> AttemptsScreen(s)
                 }
             }
             s.notice?.let { Banner(it.text, it.warn, Modifier.padding(horizontal = 12.dp, vertical = 4.dp).clickable { s.notice = null }) }
-            VoiceBar(s, mic)
+            // Forms with their own keyboard hide the voice bar; the order screen keeps it, so items can be spoken in.
+            if (s.page == null || s.page is Page.OrderForm) VoiceBar(s, mic)
         }
     }
+    BackHandler(enabled = s.page != null) { s.back() }
     if (s.showIntro) IntroScreen(s, mic)
 }
 
@@ -249,6 +262,7 @@ fun ChatScreen(s: AppState) {
             Chip("☀️ ${t.today}") { s.clearChat(); s.go(Tab.TODAY) }
             Chip("📋 ${t.count}") { s.clearChat(); s.go(Tab.COUNT) }
             Chip("🚚 ${t.deliveries}") { s.clearChat(); s.go(Tab.DELIVERIES) }
+            Chip("🛒 ${t.orders}") { s.clearChat(); s.go(Tab.ORDERS) }
             Chip("🕘 ${t.activity}") { s.clearChat(); s.go(Tab.ACTIVITY) }
         }
     }
@@ -300,6 +314,7 @@ fun ChatRow(s: AppState, m: ChatMessage) {
             }
         }
         is ChatBody.Ask -> AskCard(s, m, b)
+        is ChatBody.Draft -> DraftCard(s, m, b)
         is ChatBody.Counted -> AppBubble {
             Text(t.heardCount(b.items.size), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = C.Ink2)
             b.items.forEach { (name, qty) -> Row { Text(name, fontSize = 16.sp); Spacer(Modifier.weight(1f)); Text(qty?.toString() ?: "—", fontWeight = FontWeight.ExtraBold, fontSize = 17.sp, color = C.Mint) } }
@@ -363,6 +378,7 @@ fun TodayScreen(s: AppState) {
         }
         if (s.isWarehouse) HotelsAskingPanel(s) { changing = it }
         else if (s.hasWarehouse) FromWarehousePanel(s) { asking = true }
+        BuyingPanels(s, full = false)
         Text(t.storeNow, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = C.Ink2, modifier = Modifier.padding(top = 4.dp))
         val rows = s.stock.sortedWith(compareBy({ !it.low }, { it.name }))
         rows.chunked(2).forEach { pair ->

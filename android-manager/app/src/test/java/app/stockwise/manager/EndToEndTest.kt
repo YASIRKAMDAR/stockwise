@@ -7,6 +7,8 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ApplicationProvider
@@ -58,6 +60,14 @@ class EndToEndTest {
     private var requestsJson = "[]"
     private val openRequest = """[{"id":"r1","status":"OPEN","note":"low","createdAt":"2026-11-16T03:00:00Z","hotel":{"id":"h1","name":"Demo Hotel 1"},"warehouse":{"id":"wh","name":"Central Warehouse"},"requestedBy":"Priya Shah",
         "lines":[{"productId":"p1","name":"Soap","unit":"pcs","quantity":48,"warehouseStock":900}],"ageHours":2.0}]"""
+    // Buying from a supplier: one order that moves DRAFT -> SENT -> RECEIVED.
+    private var orderStatus = "NONE"
+    private fun orderJson() = """{"id":"o1","number":7,"status":"$orderStatus","siteName":"Central Warehouse","supplier":{"id":"s1","name":"Demo Dairy","phone":"98250 00001","onWhatsapp":true},
+        "lines":[{"productId":"i1","name":"Paneer","unit":"KG","hasExpiry":true,"quantity":20,"received":0,"store":4,"unitPrice":320.0,"lastPrice":320.0}],"total":6400.0,
+        "message":"Hello, order from Central Warehouse:\n\n1. Paneer — 20 KG\n\nOrder 7. Thank you."}"""
+    private val orderRow = """{"id":"o1","number":7,"status":"SENT","supplier":{"id":"s1","name":"Demo Dairy"},"items":1,"names":"Paneer","total":6400.0}"""
+    private val supplierJson = """{"id":"s1","name":"Demo Dairy","phone":"98250 00001","onWhatsapp":true,"deliveryDays":1,"favourite":false,"orders":3,"boughtBefore":true,
+        "categories":[{"id":"c1","name":"Food","allItems":true,"picked":0,"orders":3,"boughtBefore":true}],"recentOrders":[],"boughtMost":[]}"""
     @Before fun startServer() {
         server = MockWebServer()
         server.dispatcher = object : Dispatcher() {
@@ -102,6 +112,17 @@ class EndToEndTest {
                     p.endsWith("/transfers/t1/receipts") && request.method == "POST" -> json("""{"ok":true}""", 201)
                     p.startsWith("/transactions") -> json("""{"items":[]}""")
                     p.startsWith("/me/voice-attempts") -> json("""{"attempts":[]}""")
+                    p.startsWith("/sites/") -> json("""{"isWarehouse":true,"deliveriesDue":[${if (orderStatus == "SENT") orderRow else ""}],"drafts":[],"low":[],"useFirst":[]}""")
+                    p.startsWith("/catalog/categories") -> json("""[{"id":"c1","name":"Food & Beverage","shortName":"Food","items":3}]""")
+                    p == "/suppliers/s1" -> json(supplierJson)
+                    p.startsWith("/suppliers") -> json("[$supplierJson]")
+                    p.startsWith("/orders/suggest") -> json("""[{"productId":"i1","name":"Paneer","unit":"KG","store":4,"par":24,"lastQuantity":20,"lastPrice":320.0,"quantity":20}]""")
+                    p == "/orders/draft-from-text" -> json("""{"text":"order from demo dairy 20 kilo paneer","supplier":{"id":"s1","name":"Demo Dairy"},
+                        "lines":[{"heard":"paneer","quantity":20,"match":{"productId":"i1","name":"Paneer","unit":"KG","lastPrice":320.0},"alternatives":[],"unsure":false}],"total":6400.0,"ready":true}""")
+                    p == "/orders" && request.method == "POST" -> { orderStatus = "DRAFT"; json("""{"id":"o1","number":7,"status":"DRAFT"}""", 201) }
+                    p == "/orders/o1/send" -> { orderStatus = "SENT"; json(orderJson()) }
+                    p == "/orders/o1/deliveries" -> { orderStatus = "RECEIVED"; json("""{"deliveryId":"d1","orderStatus":"RECEIVED","flags":[],"creditDue":0.0}""", 201) }
+                    p == "/orders/o1" -> json(orderJson())
                     else -> json("""{"error":{"code":"NOT_FOUND","message":"no route $p"}}""", 404)
                 }
             }
@@ -232,5 +253,56 @@ class EndToEndTest {
         assertEquals("POST", d.method)
         assertTrue(d.getHeader("idempotency-key") != null)
         waitFor(s, "request gone", 10_000) { s.openRequests.isEmpty() }
+    }
+
+    /** Warehouse: order from a supplier (typed quantity), send on WhatsApp, check the delivery in, then the same order spoken in one sentence. */
+    @Test fun order_from_supplier_and_check_delivery() {
+        val s = state().also { it.store.hotelId = "wh"; it.hotelId = "wh" }
+        signIn(s)
+        s.go(Tab.SUPPLIERS)
+        waitFor(s, "suppliers listed", 10_000) { s.suppliers.isNotEmpty() }
+        rule.onNodeWithText("Demo Dairy").performClick(); pump()
+        waitFor(s, "supplier card", 10_000) { s.page is Page.SupplierCard }
+        rule.onNodeWithText("Order").performClick(); pump()
+        waitFor(s, "order form pre-filled", 10_000) { (s.page as? Page.OrderForm)?.lines?.firstOrNull()?.qty == 20 }
+        // The quantity is a box you type in.
+        rule.onNodeWithTag("qty-i1").performTextReplacement("25"); pump()
+        assertEquals(25, (s.page as Page.OrderForm).lines[0].qty)
+        rule.onNodeWithText("Send to supplier").performClick(); pump()
+        waitFor(s, "message preview", 10_000) { s.page is Page.Message }
+        val made = received.last { it.path == "/orders" && it.method == "POST" }.body.readUtf8()
+        assertTrue(made, made.contains("\"siteId\":\"wh\"") && made.contains("\"supplierId\":\"s1\"") && made.contains("\"quantity\":25"))
+        assertTrue(received.none { it.path == "/orders/o1/send" })
+
+        rule.onNodeWithText("Send on WhatsApp").performClick(); pump()
+        waitFor(s, "order sent", 10_000) { received.any { it.path == "/orders/o1/send" } && s.page == null && s.home?.deliveriesDue?.isNotEmpty() == true }
+        val wa = org.robolectric.Shadows.shadowOf(ApplicationProvider.getApplicationContext<android.app.Application>()).nextStartedActivity
+        assertTrue("$wa", wa?.dataString?.startsWith("https://wa.me/919825000001?text=") == true)
+
+        // The delivery arrives: everything is pre-filled as received; paneer needs a use-by date.
+        rule.waitForIdle()
+        rule.onNodeWithText("Check").performClick(); pump()
+        waitFor(s, "check page", 10_000) { s.page is Page.Check }
+        rule.onNodeWithText("1 week").performClick(); pump()
+        rule.onNodeWithText("Add to stock").performClick(); pump()
+        waitFor(s, "delivery saved", 10_000) { received.any { it.path == "/orders/o1/deliveries" } && s.page == null && !s.busy }
+        val d = received.last { it.path == "/orders/o1/deliveries" }
+        val checked = d.body.readUtf8()
+        assertTrue(checked, checked.contains("\"productId\":\"i1\"") && checked.contains("\"received\":20") && checked.contains("\"expiryDate\":\""))
+        assertTrue(d.getHeader("idempotency-key") != null)
+
+        // Spoken in one go: a draft card waits; nothing is saved until Confirm.
+        s.go(Tab.TODAY); pump()
+        waitFor(s, "today", 10_000) { !s.busy }
+        received.clear()
+        rule.onNodeWithContentDescription("Ask: “how much soap is left?”").performTextInput("order from demo dairy 20 kilo paneer")
+        rule.onNodeWithContentDescription("Send").performClick(); pump()
+        waitFor(s, "draft card", 10_000) { s.chat.any { it.body is ChatBody.Draft } && !s.busy }
+        rule.waitForIdle()
+        assertTrue(received.none { it.path == "/orders" && it.method == "POST" })
+        rule.onNodeWithText("Confirm").performClick(); pump()
+        waitFor(s, "spoken order saved", 10_000) { s.page is Page.Message }
+        val spoken = received.last { it.path == "/orders" && it.method == "POST" }.body.readUtf8()
+        assertTrue(spoken, spoken.contains("\"source\":\"VOICE\"") && spoken.contains("\"quantity\":20"))
     }
 }

@@ -57,8 +57,48 @@ import kotlinx.serialization.json.JsonElement
 @Serializable data class ApiErrorBody(val error: ApiErrorInner? = null)
 @Serializable data class ApiErrorInner(val code: String = "", val message: String = "", val details: JsonElement? = null)
 
+// ---- catalog, suppliers, orders to suppliers, deliveries ----
+@Serializable data class Category(val id: String, val name: String = "", val shortName: String = "", val items: Int = 0)
+@Serializable data class SupplierTag(val id: String, val name: String, val more: Int = 0)
+@Serializable data class UseFirst(val by: String? = null, val quantity: Int = 0)
+@Serializable data class CatalogItem(val id: String, val code: String = "", val name: String, val unit: String = "", val photoUrl: String? = null, val category: String? = null, val categoryId: String? = null,
+    val store: Int = 0, val min: Int = 0, val par: Int = 0, val lastPrice: Double? = null, val hasExpiry: Boolean = false, val status: String = "NONE", val useFirst: UseFirst? = null, val supplier: SupplierTag? = null)
+@Serializable data class ItemsPage(val total: Int = 0, val items: List<CatalogItem> = emptyList())
+@Serializable data class SupplierCat(val id: String, val name: String, val allItems: Boolean = true, val picked: Int = 0, val orders: Int = 0, val boughtBefore: Boolean = false)
+@Serializable data class SupplierOrder(val id: String, val number: Int, val status: String, val items: String? = null, val total: Double = 0.0, val sentAt: String? = null, val createdAt: String? = null)
+@Serializable data class BoughtItem(val id: String, val name: String, val unit: String = "", val times: Int = 0, val lastPrice: Double? = null)
+@Serializable data class Supplier(val id: String, val name: String, val phone: String? = null, val onWhatsapp: Boolean = true, val deliveryDays: Int? = null, val favourite: Boolean = false, val orders: Int = 0,
+    val boughtBefore: Boolean = false, val categories: List<SupplierCat> = emptyList(), val recentOrders: List<SupplierOrder> = emptyList(), val boughtMost: List<BoughtItem> = emptyList())
+@Serializable data class PickItem(val id: String, val name: String, val unit: String = "", val picked: Boolean = false, val boughtBefore: Boolean = false, val times: Int = 0, val lastPrice: Double? = null)
+@Serializable data class OrderSummary(val id: String, val number: Int, val status: String, val expectedDate: String? = null, val supplier: NamedRef, val items: Int = 0, val names: String? = null, val total: Double = 0.0)
+@Serializable data class OrderSupplier(val id: String, val name: String, val phone: String? = null, val onWhatsapp: Boolean = true)
+@Serializable data class OrderLine(val productId: String, val name: String, val unit: String = "", val hasExpiry: Boolean = false, val quantity: Int = 0, val received: Int = 0, val store: Int = 0, val unitPrice: Double? = null, val lastPrice: Double? = null)
+@Serializable data class Order(val id: String, val number: Int, val status: String, val siteName: String = "", val supplier: OrderSupplier, val expectedDate: String? = null, val lines: List<OrderLine> = emptyList(), val total: Double = 0.0, val message: String = "")
+@Serializable data class Suggestion(val productId: String, val name: String, val unit: String = "", val store: Int = 0, val par: Int = 0, val lastQuantity: Int? = null, val lastPrice: Double? = null, val quantity: Int = 0)
+@Serializable data class LowItem(val productId: String, val name: String, val unit: String = "", val store: Int = 0, val min: Int = 0)
+@Serializable data class UseFirstItem(val productId: String, val name: String, val unit: String = "", val quantity: Int = 0, val days: Int = 0)
+@Serializable data class SiteHome(val isWarehouse: Boolean = false, val deliveriesDue: List<OrderSummary> = emptyList(), val drafts: List<OrderSummary> = emptyList(), val low: List<LowItem> = emptyList(), val useFirst: List<UseFirstItem> = emptyList())
+@Serializable data class DraftMatch(val productId: String, val name: String, val unit: String = "", val lastPrice: Double? = null)
+@Serializable data class DraftLine(val heard: String = "", val quantity: Int? = null, val match: DraftMatch? = null, val alternatives: List<DraftMatch> = emptyList(), val unsure: Boolean = false)
+@Serializable data class OrderDraft(val text: String = "", val supplier: NamedRef? = null, val lines: List<DraftLine> = emptyList(), val total: Double = 0.0, val ready: Boolean = false)
+@Serializable data class Flag(val productId: String = "", val kind: String = "", val detail: String = "")
+@Serializable data class DeliveryResult(val deliveryId: String, val orderStatus: String? = null, val flags: List<Flag> = emptyList(), val creditDue: Double = 0.0)
+@Serializable data class Created(val id: String, val number: Int? = null, val existed: Boolean = false)
+
 // App state shapes
-enum class Tab { TODAY, COUNT, STOCK, DELIVERIES, ACTIVITY, ATTEMPTS }
+enum class Tab { TODAY, COUNT, STOCK, DELIVERIES, ACTIVITY, ATTEMPTS, SUPPLIERS, ORDERS }
+/** One line of an order being written: what the store has, what would fill it up, what was ordered last time, and the quantity typed. */
+data class FormLine(val productId: String, val name: String, val unit: String = "", val store: Int = 0, val fill: Int = 0, val last: Int? = null, val qty: Int = 0)
+/** A screen opened on top of a tab (back returns to the tab). */
+sealed class Page {
+    data class SupplierCard(val supplier: Supplier) : Page()
+    object SupplierAdd : Page()
+    data class SupplierItems(val supplier: Supplier, val cat: SupplierCat, val items: List<PickItem>) : Page()
+    data class OrderForm(val supplier: NamedRef?, val lines: List<FormLine> = emptyList(), val orderId: String? = null, val source: String = "FORM") : Page()
+    data class Message(val order: Order) : Page()
+    data class Check(val order: Order) : Page()
+    object AddItem : Page()
+}
 data class Notice(val text: String, val warn: Boolean = true)
 enum class Role { ME, APP }
 sealed class ChatBody {
@@ -69,6 +109,8 @@ sealed class ChatBody {
     data class Retry(val heard: String) : ChatBody()
     /** A spoken request to the warehouse, waiting for the manager to press Send. */
     data class Ask(val lines: List<Pair<Product, Int>>, var sent: Boolean = false) : ChatBody()
+    /** An order to a supplier built from one spoken sentence. Nothing is ordered until Confirm. */
+    data class Draft(val draft: OrderDraft, val state: String = "OPEN") : ChatBody()
 }
 data class ChatMessage(val role: Role, val body: ChatBody, val id: Long = System.nanoTime())
 

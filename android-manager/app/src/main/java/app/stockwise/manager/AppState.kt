@@ -1,6 +1,13 @@
 package app.stockwise.manager
 
 import android.content.Context
+import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
+import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
+import java.io.File
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -47,6 +54,20 @@ class AppState(ctx: Context, apiBase: String = BuildConfig.API_BASE) {
     var requests by mutableStateOf<List<StockRequest>>(emptyList())
     var topUp by mutableStateOf<TopUp?>(null)
     var schedules by mutableStateOf<List<RequestSchedule>>(emptyList())
+
+    // Suppliers, orders to suppliers, deliveries
+    var home by mutableStateOf<SiteHome?>(null)
+    var items by mutableStateOf<List<CatalogItem>>(emptyList())
+    var itemQuery by mutableStateOf("")
+    var categories by mutableStateOf<List<Category>>(emptyList())
+    var suppliers by mutableStateOf<List<Supplier>>(emptyList())
+    var supplierQuery by mutableStateOf("")
+    var page by mutableStateOf<Page?>(null)
+    /** Items found while adding to an order. */
+    var found by mutableStateOf<List<CatalogItem>>(emptyList())
+    /** Photos taken while checking a delivery (BILL or GOODS), sent once the delivery is saved. */
+    var photos by mutableStateOf<List<Pair<String, ByteArray>>>(emptyList())
+    private var searchJob: Job? = null
 
     // Voice / conversation
     var chat by mutableStateOf<List<ChatMessage>>(emptyList())
@@ -96,9 +117,9 @@ class AppState(ctx: Context, apiBase: String = BuildConfig.API_BASE) {
         } catch (e: ApiException) { loginError = e.message } catch (e: OfflineException) { loginError = t.offlineLogin }
         busy = false
     }
-    fun signOut() = scope.launch { api.logout(); me = null; chat = emptyList(); stock = emptyList(); alerts = emptyList(); sheet = null }
+    fun signOut() = scope.launch { api.logout(); me = null; chat = emptyList(); stock = emptyList(); alerts = emptyList(); sheet = null; page = null; home = null }
     fun setLanguage(l: String) { lang = l; store.lang = l; scope.launch { runCatching { api.setLanguage(l) } } }
-    fun setHotel(id: String) { hotelId = id; store.hotelId = id; chat = emptyList(); sheet = null; scope.launch { loadAll() } }
+    fun setHotel(id: String) { hotelId = id; store.hotelId = id; chat = emptyList(); sheet = null; page = null; home = null; scope.launch { loadAll() } }
 
     // ---------- data ----------
     suspend fun loadAll() {
@@ -110,6 +131,7 @@ class AppState(ctx: Context, apiBase: String = BuildConfig.API_BASE) {
             corrections = runCatching { api.corrections(h) }.getOrDefault(emptyList())
             countStatus = runCatching { api.countStatus(h).firstOrNull() }.getOrNull()
             if (hasWarehouse) requests = runCatching { api.requests(h) }.getOrDefault(emptyList())
+            home = runCatching { api.siteHome(h) }.getOrNull()
         } catch (e: Exception) { handle(e) }
     }
     fun refresh() = scope.launch { loadAll(); loadTab(tab) }
@@ -118,7 +140,7 @@ class AppState(ctx: Context, apiBase: String = BuildConfig.API_BASE) {
         try {
             when (to) {
                 Tab.TODAY -> loadAll()
-                Tab.STOCK -> stock = api.stock(h).items
+                Tab.STOCK -> { stock = api.stock(h).items; if (isWarehouse) items = runCatching { api.items(h, itemQuery).items }.getOrDefault(emptyList()) }
                 Tab.COUNT -> {
                     countStatus = api.countStatus(h).firstOrNull()
                     sheet = countStatus?.draftCountId?.let { api.count(it) }
@@ -133,10 +155,12 @@ class AppState(ctx: Context, apiBase: String = BuildConfig.API_BASE) {
                 }
                 Tab.ACTIVITY -> { events = api.activity(h).items; corrections = runCatching { api.corrections(h) }.getOrDefault(emptyList()) }
                 Tab.ATTEMPTS -> attempts = runCatching { api.voiceAttempts().attempts }.getOrDefault(emptyList())
+                Tab.SUPPLIERS -> { suppliers = api.suppliers(supplierQuery); loadCategories() }
+                Tab.ORDERS -> home = api.siteHome(h)
             }
         } catch (e: Exception) { handle(e) }
     }
-    fun go(to: Tab) { if (to != tab) chat = emptyList(); tab = to; scope.launch { loadTab(to) } }
+    fun go(to: Tab) { if (to != tab) chat = emptyList(); page = null; tab = to; scope.launch { loadTab(to) } }
     private fun handle(e: Exception) {
         when (e) {
             is ApiException -> if (e.status == 401) { store.session = null; me = null } else notice = Notice(e.message)
@@ -256,6 +280,189 @@ class AppState(ctx: Context, apiBase: String = BuildConfig.API_BASE) {
         askWarehouse(b.lines.associate { it.first.id to it.second }) { chat = chat.map { if (it.id == m.id) it.copy(body = b.copy(sent = true)) else it } }
     }
 
+    // ---------- suppliers ----------
+    private suspend fun loadCategories() { if (categories.isEmpty()) categories = runCatching { api.categories() }.getOrDefault(emptyList()) }
+    /** Runs the newest search only; an older one still on its way is dropped. */
+    private fun search(block: suspend () -> Unit) {
+        searchJob?.cancel()
+        searchJob = scope.launch { try { block() } catch (e: ApiException) { handle(e) } catch (e: OfflineException) { handle(e) } }
+    }
+    fun searchSuppliers(q: String) { supplierQuery = q; search { suppliers = api.suppliers(q) } }
+    fun searchItems(q: String) { itemQuery = q; val h = hotelId ?: return; search { items = api.items(h, q).items } }
+    fun openSupplier(id: String) = scope.launch { try { page = Page.SupplierCard(api.supplier(id)); loadCategories() } catch (e: Exception) { handle(e) } }
+    fun newSupplier() { page = Page.SupplierAdd; scope.launch { loadCategories() } }
+    fun saveSupplier(name: String, phone: String, categoryIds: List<String>) = scope.launch {
+        try {
+            val c = api.createSupplier(SupplierBody(name.trim(), phone.trim().ifBlank { null }, categoryIds = categoryIds))
+            suppliers = api.suppliers(supplierQuery); page = Page.SupplierCard(api.supplier(c.id))
+        } catch (e: Exception) { handle(e) }
+    }
+    fun toggleFavourite(sup: Supplier) = scope.launch {
+        try { api.patchSupplier(sup.id, SupplierBody(favourite = !sup.favourite)); page = Page.SupplierCard(api.supplier(sup.id)); suppliers = api.suppliers(supplierQuery) } catch (e: Exception) { handle(e) }
+    }
+    fun addSupplierCategory(sup: Supplier, categoryId: String) = scope.launch {
+        try { api.setSupplierCategory(sup.id, categoryId, true, emptyList()); page = Page.SupplierCard(api.supplier(sup.id)) } catch (e: Exception) { handle(e) }
+    }
+    fun openSupplierItems(sup: Supplier, cat: SupplierCat) = scope.launch { try { page = Page.SupplierItems(sup, cat, api.supplierItems(sup.id, cat.id)) } catch (e: Exception) { handle(e) } }
+    fun saveSupplierItems(sup: Supplier, cat: SupplierCat, all: Boolean, ids: List<String>) = scope.launch {
+        try { api.setSupplierCategory(sup.id, cat.id, all, if (all) emptyList() else ids); notice = Notice(t.saved, warn = false); page = Page.SupplierCard(api.supplier(sup.id)) } catch (e: Exception) { handle(e) }
+    }
+    fun back() { val p = page; page = if (p is Page.SupplierItems) Page.SupplierCard(p.supplier) else null }
+
+    // The phone's own dialler and WhatsApp do the talking to suppliers; the app only opens them.
+    private fun launch(i: Intent): Boolean = runCatching { app.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess
+    fun call(phone: String?) {
+        val d = (phone ?: "").filter { it.isDigit() || it == '+' }
+        if (d.isEmpty() || !launch(Intent(Intent.ACTION_DIAL, Uri.parse("tel:$d")))) notice = Notice(t.noPhone)
+    }
+    fun whatsapp(phone: String?, text: String = "") {
+        var d = (phone ?: "").filter { it.isDigit() }
+        if (d.length == 10) d = "91$d"
+        if (d.isEmpty()) { notice = Notice(t.noPhone); return }
+        if (!launch(Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/$d" + if (text.isNotBlank()) "?text=" + Uri.encode(text) else "")))) notice = Notice(t.noWhatsapp)
+    }
+
+    // ---------- orders to suppliers ----------
+    private fun form() = page as? Page.OrderForm
+    /** Opens the order screen. With a supplier it comes pre-filled with what is running low; `keep` are lines already chosen (a spoken draft being edited). */
+    fun startOrder(sup: NamedRef?, keep: List<FormLine> = emptyList(), source: String = "FORM") = scope.launch {
+        val h = hotelId ?: return@launch
+        found = emptyList()
+        if (sup == null) {
+            page = Page.OrderForm(null, keep, source = source)
+            if (suppliers.isEmpty()) suppliers = runCatching { api.suppliers() }.getOrDefault(emptyList())
+            return@launch
+        }
+        try {
+            val low = api.suggest(h, sup.id).map { FormLine(it.productId, it.name, it.unit, it.store, it.quantity, it.lastQuantity, if (keep.isEmpty()) it.quantity else 0) }
+            page = Page.OrderForm(sup, keep + low.filter { x -> keep.none { it.productId == x.productId } }, source = source)
+        } catch (e: Exception) { handle(e) }
+    }
+    fun setQty(productId: String, qty: Int) { val f = form() ?: return; page = f.copy(lines = f.lines.map { if (it.productId == productId) it.copy(qty = qty.coerceIn(0, 1_000_000)) else it }) }
+    fun sameAsLast() { val f = form() ?: return; page = f.copy(lines = f.lines.map { it.copy(qty = it.last ?: it.qty) }) }
+    fun fillUp() { val f = form() ?: return; page = f.copy(lines = f.lines.map { if (it.fill > 0) it.copy(qty = it.fill) else it }) }
+    fun clearQty() { val f = form() ?: return; page = f.copy(lines = f.lines.map { it.copy(qty = 0) }) }
+    fun findItems(q: String) {
+        val h = hotelId ?: return
+        if (q.trim().length < 2) { searchJob?.cancel(); found = emptyList(); return }
+        search { found = api.items(h, q).items }
+    }
+    fun addOrderItem(i: CatalogItem) {
+        val f = form() ?: return
+        found = emptyList()
+        if (f.lines.none { it.productId == i.id }) page = f.copy(lines = listOf(FormLine(i.id, i.name, i.unit, i.store, (i.par - i.store).coerceAtLeast(0))) + f.lines)
+    }
+    /** Saves the order as a draft and shows the message the supplier will get. Nothing is sent yet. */
+    fun saveOrder() = scope.launch {
+        val h = hotelId ?: return@launch
+        val f = form() ?: return@launch
+        val sup = f.supplier ?: return@launch
+        val lines = f.lines.filter { it.qty > 0 }.map { DispatchLine(it.productId, it.qty) }
+        if (lines.isEmpty()) { notice = Notice(t.addOneItem); return@launch }
+        try {
+            val id = f.orderId?.also { api.patchOrder(it, sup.id, lines) } ?: api.createOrder(h, sup.id, lines, f.source).id
+            page = Page.Message(api.order(id)); home = runCatching { api.siteHome(h) }.getOrNull()
+        } catch (e: Exception) { handle(e) }
+    }
+    fun openOrder(o: OrderSummary) = scope.launch {
+        try { val full = api.order(o.id); photos = emptyList(); page = if (full.status == "DRAFT") Page.Message(full) else Page.Check(full) } catch (e: Exception) { handle(e) }
+    }
+    fun editOrder(o: Order) { found = emptyList(); page = Page.OrderForm(NamedRef(o.supplier.id, o.supplier.name), o.lines.map { FormLine(it.productId, it.name, it.unit, it.store, qty = it.quantity) }, o.id) }
+    /** Marks the order as sent and opens WhatsApp with the message ready (or the dialler). */
+    fun sendOrder(o: Order, byCall: Boolean) = scope.launch {
+        val h = hotelId ?: return@launch
+        try {
+            val sent = api.sendOrder(o.id)
+            page = null; chat = emptyList(); tab = Tab.ORDERS; notice = Notice(t.orderSent(sent.supplier.name), warn = false)
+            if (byCall) call(sent.supplier.phone) else whatsapp(sent.supplier.phone, sent.message)
+            home = runCatching { api.siteHome(h) }.getOrNull()
+        } catch (e: Exception) { handle(e) }
+    }
+
+    // ---------- checking a delivery ----------
+    /** Keeps a phone photo as a small JPEG (long side 1600 px) so it uploads on a weak signal. */
+    fun addPhoto(kind: String, file: File) = scope.launch {
+        val jpeg = withContext(Dispatchers.IO) {
+            runCatching {
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeFile(file.path, bounds)
+                var sample = 1
+                while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 1600) sample *= 2
+                val bmp = BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = sample })
+                val out = ByteArrayOutputStream()
+                if (bmp != null && bmp.compress(Bitmap.CompressFormat.JPEG, 80, out)) out.toByteArray() else null
+            }.getOrNull()
+        }
+        runCatching { file.delete() }
+        if (jpeg != null) photos = (photos + (kind to jpeg)).takeLast(6) else notice = Notice(t.noCamera)
+    }
+    fun submitCheck(o: Order, lines: List<DeliveryLineBody>) = scope.launch {
+        if (lines.isEmpty()) return@launch
+        busy = true
+        try {
+            val r = api.checkIn(o.id, lines, UUID.randomUUID().toString())
+            photos.forEach { (kind, jpeg) -> runCatching { api.uploadPhoto(r.deliveryId, kind, jpeg) } }
+            photos = emptyList(); page = null
+            notice = Notice(t.deliveryChecked(r.flags.count { it.kind == "SHORT" }, r.flags.count { it.kind == "SENT_BACK" }, r.flags.count { it.kind == "PRICE_UP" }), warn = r.flags.isNotEmpty())
+            loadAll(); loadTab(tab)
+        } catch (e: Exception) { handle(e) }
+        busy = false
+    }
+
+    // ---------- items ----------
+    fun newItem() { page = Page.AddItem; scope.launch { loadCategories() } }
+    fun addItem(name: String, unit: String, categoryId: String?) = scope.launch {
+        try {
+            val c = api.createItem(name.trim(), unit, categoryId)
+            notice = Notice(if (c.existed) t.alreadyInList else t.saved, warn = false); page = null; itemQuery = name.trim(); loadTab(Tab.STOCK)
+        } catch (e: Exception) { handle(e) }
+    }
+
+    // ---------- an order spoken in one go ----------
+    private fun wantsOrder(text: String): Boolean {
+        val s = text.lowercase()
+        if (Regex("warehouse|godown|गोदाम|ગોડાઉન").containsMatchIn(s)) return false
+        return tab == Tab.ORDERS || Regex("\\border|ऑर्डर|ओर्डर|ઓર્ડર").containsMatchIn(s)
+    }
+    private fun draftLines(d: OrderDraft) = d.lines.mapNotNull { l -> l.match?.let { m -> FormLine(m.productId, m.name, m.unit, qty = l.quantity ?: 0) } }
+    /** Matches the spoken supplier and items and shows a draft with Discard / Edit / Confirm. Saves nothing. */
+    private suspend fun tryDraft(text: String, mic: Mic): Boolean {
+        val h = hotelId ?: return false
+        val d = try { api.draftOrder(h, text) } catch (e: ApiException) { return false } catch (e: OfflineException) { return false }
+        if (d.lines.none { it.match != null } || (d.supplier == null && tab != Tab.ORDERS)) return false
+        post(ChatBody.Draft(d))
+        speak(mic, if (d.ready) t.draftReady(d.supplier?.name ?: "", d.lines.size) else t.draftCheck, lang)
+        return true
+    }
+    private fun markDraft(m: ChatMessage, state: String) {
+        val b = m.body as? ChatBody.Draft ?: return
+        chat = chat.map { if (it.id == m.id) it.copy(body = b.copy(state = state)) else it }
+    }
+    fun discardDraft(m: ChatMessage) { markDraft(m, "DISCARDED") }
+    fun editDraft(m: ChatMessage) { val b = m.body as? ChatBody.Draft ?: return; markDraft(m, "EDITED"); startOrder(b.draft.supplier, draftLines(b.draft), "VOICE") }
+    fun confirmDraft(m: ChatMessage) = scope.launch {
+        val h = hotelId ?: return@launch
+        val b = m.body as? ChatBody.Draft ?: return@launch
+        val sup = b.draft.supplier ?: return@launch
+        try {
+            val c = api.createOrder(h, sup.id, draftLines(b.draft).filter { it.qty > 0 }.map { DispatchLine(it.productId, it.qty) }, "VOICE")
+            markDraft(m, "CONFIRMED"); page = Page.Message(api.order(c.id)); home = runCatching { api.siteHome(h) }.getOrNull()
+        } catch (e: Exception) { handle(e) }
+    }
+    /** On the order screen, speech adds to the order in hand: "20 kilo paneer, 5 butter". */
+    private suspend fun speakInto(f: Page.OrderForm, text: String) {
+        val h = hotelId ?: return
+        if (text.isBlank()) { notice = Notice(t.notUnderstood); return }
+        try {
+            val got = draftLines(api.draftOrder(h, text, f.supplier?.id))
+            val cur = form()
+            if (got.isEmpty() || cur == null) { notice = Notice(t.notUnderstood); return }
+            val merged = cur.lines.map { l -> got.firstOrNull { it.productId == l.productId && it.qty > 0 }?.let { g -> l.copy(qty = g.qty) } ?: l }
+            page = cur.copy(lines = got.filter { g -> cur.lines.none { it.productId == g.productId } } + merged)
+            notice = Notice(got.joinToString(", ") { "${it.name} ${it.qty}" }, warn = false)
+        } catch (e: ApiException) { handle(e) } catch (e: OfflineException) { handle(e) }
+    }
+
     // ---------- activity ----------
     fun reverse(e: Event, reason: String) = scope.launch {
         try { api.reverse(e.eventId, reason, UUID.randomUUID().toString()); notice = Notice(t.reversed, warn = false); loadTab(Tab.ACTIVITY); loadAll() } catch (x: Exception) { handle(x) }
@@ -284,13 +491,20 @@ class AppState(ctx: Context, apiBase: String = BuildConfig.API_BASE) {
     fun interpret(text: String, durationMs: Long, mic: Mic) = scope.launch {
         val h = hotelId ?: return@launch
         notice = null
+        form()?.let { busy = true; speakInto(it, text); busy = false; return@launch }
         post(ChatBody.Said(text, durationMs > 0), Role.ME)
         localCommand(text)?.let { applyLocal(it); return@launch }
+        if (wantsOrder(text)) { busy = true; val drafted = tryDraft(text, mic); busy = false; if (drafted) return@launch }
         ask(mic) { api.interpret(h, text, lang, durationMs, voiceMode) }
     }
     fun interpretAudio(audio: ByteArray, durationMs: Long, heard: String, mic: Mic) = scope.launch {
         val h = hotelId ?: return@launch
         notice = null
+        form()?.let { f ->
+            busy = true
+            try { speakInto(f, api.interpretAudio(h, audio, lang, durationMs, heard).transcript.ifBlank { heard }) } catch (e: ApiException) { handle(e) } catch (e: OfflineException) { handle(e) }
+            busy = false; return@launch
+        }
         val bubble = ChatMessage(Role.ME, ChatBody.Said(if (heard.isBlank()) "…" else heard, true))
         chat = (chat + bubble).takeLast(30)
         ask(mic, bubble.id, heard) { api.interpretAudio(h, audio, lang, durationMs, heard, voiceMode) }
@@ -310,6 +524,7 @@ class AppState(ctx: Context, apiBase: String = BuildConfig.API_BASE) {
                 if (m.id != target) m else { val said = m.body as ChatBody.Said; m.copy(body = said.copy(text = if (bubbleId != null) p.transcript.ifBlank { said.text } else said.text, lang = tag)) }
             }
             if (bubbleId != null) localCommand(p.transcript)?.let { applyLocal(it); return }
+            if (bubbleId != null && wantsOrder(p.transcript) && tryDraft(p.transcript, mic)) return
             if ("FALLBACK_RULES" in p.warnings) post(ChatBody.Text(t.fromPhoneWords, true))
             handleProposal(p, mic)
         } catch (e: ApiException) {
