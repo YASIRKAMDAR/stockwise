@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { bal, Client, ledgerMatchesBalances, pwClient, setupWorld, staffClient, PW, type World } from './helpers.ts';
+import { bal, Client, ledgerMatchesBalances, multipart, pwClient, setupWorld, staffClient, PW, type World } from './helpers.ts';
 import { createHotel, createUser } from '../src/db/fixtures.ts';
 import { splitSpokenOrder } from '../src/services/orders.ts';
 
@@ -217,5 +217,28 @@ describe('Order from a spoken sentence', () => {
     expect((await w.db.query('SELECT count(*)::int AS n FROM purchase_orders')).rows[0].n).toBe(before);
     const none = (await whm.post('/orders/draft-from-text', { siteId: wh, text: 'five kilo unobtainium' })).body;
     expect(none.supplier).toBeNull(); expect(none.lines[0].match).toBeNull(); expect(none.ready).toBe(false);
+  });
+});
+
+describe('Help from the bill and the web', () => {
+  it('a bill is read against the open order lines; nothing is saved', async () => {
+    const o = await whm.post('/orders', { siteId: wh, supplierId: dairy, lines: [{ productId: item['ITM-0019'], quantity: 10, unitPrice: 590 }, { productId: item['ITM-0021'], quantity: 4 }] });
+    expect(o.status).toBe(201);
+    await whm.post(`/orders/${o.body.id}/send`, {});
+    const count = async () => (await w.db.query('SELECT count(*)::int AS n FROM deliveries')).rows[0].n;
+    const before = await count();
+    const f = multipart({}, 'amul butter, 8, 610\nPaper bags, 2, 40');
+    const r = await whm.req('POST', `/orders/${o.body.id}/read-bill`, f.body, { headers: f.headers });
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({ read: true, lines: [{ productId: item['ITM-0019'], quantity: 8, unitPrice: 610 }], extras: [{ name: 'Paper bags', quantity: 2 }], missing: [item['ITM-0021']] });
+    expect(await count()).toBe(before);
+    await whm.post(`/orders/${o.body.id}/cancel`, {});
+  });
+  it('web lookup gives options to pick from and is for managers', async () => {
+    const r = await whm.get('/catalog/lookup?q=amul%20cheese');
+    expect(r.status).toBe(200);
+    expect(r.body.options.length).toBeGreaterThan(0);
+    expect(r.body.options[0]).toHaveProperty('unit');
+    expect((await whm.get('/catalog/lookup?q=a')).status).toBe(400);
   });
 });

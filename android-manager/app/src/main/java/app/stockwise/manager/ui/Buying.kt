@@ -424,6 +424,16 @@ fun CheckPage(s: AppState, p: Page.Check) {
     val useBy = remember(o.id) { mutableStateMapOf<String, String>() }
     val price = remember(o.id) { mutableStateMapOf<String, String>() }
     val wrong = remember(o.id) { mutableStateMapOf<String, Boolean>() }
+    val read = s.bill
+    // A bill that was read fills the boxes; a price that differs from the order opens that line so it is seen.
+    LaunchedEffect(read) {
+        read?.lines?.forEach { b ->
+            val l = todo.firstOrNull { it.productId == b.productId } ?: return@forEach
+            got[b.productId] = b.quantity
+            val p = b.unitPrice
+            if (p != null && l.unitPrice != null && kotlin.math.abs(p - l.unitPrice) > l.unitPrice * 0.02) { price[b.productId] = p.toString(); wrong[b.productId] = true }
+        }
+    }
     var pending by rememberSaveable { mutableStateOf("") }   // "KIND|path" of the photo being taken
     val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
         val parts = pending.split("|", limit = 2); pending = ""
@@ -441,6 +451,11 @@ fun CheckPage(s: AppState, p: Page.Check) {
                 PhotoButton(t.photoBill, s.photos.count { it.first == "BILL" }, Modifier.weight(1f)) { snap("BILL") }
                 PhotoButton(t.photoGoods, s.photos.count { it.first == "GOODS" }, Modifier.weight(1f)) { snap("GOODS") }
             }
+            if (s.reading) Banner(t.readingBill, warn = false)
+            if (read != null) {
+                Banner(t.billRead, warn = false)
+                if (read.extras.isNotEmpty()) Text(t.alsoOnBill + ": " + read.extras.joinToString { it.name + (it.quantity?.let { q -> " " + q.toString().removeSuffix(".0") } ?: "") }, fontSize = 13.sp, color = C.Amber)
+            }
             todo.forEach { l ->
                 val id = l.productId
                 val isWrong = wrong[id] == true
@@ -449,6 +464,7 @@ fun CheckPage(s: AppState, p: Page.Check) {
                         Column(Modifier.weight(1f)) {
                             Text(l.name, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             Text(t.ordered(l.quantity - l.received, l.unit.lowercase()), fontSize = 12.sp, color = C.Ink2)
+                            if (read != null && id in read.missing) Tag(t.notOnBill, C.Amber, C.MarigoldWash)
                         }
                         Text(t.came + " ", fontSize = 13.sp, color = C.Ink2)
                         QtyBox(got[id] ?: 0, l.unit, "got-$id") { got[id] = it }
@@ -542,6 +558,16 @@ fun AddItemPage(s: AppState) {
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedTextField(name, { name = it.take(80) }, Modifier.fillMaxWidth(), label = { Text(t.name) }, singleLine = true, textStyle = MaterialTheme.typography.titleLarge)
+            PillButton(if (s.lookingUp) t.searching else t.findOnWeb, enabled = name.trim().length >= 3 && !s.lookingUp) { s.lookupItem(name) }
+            s.webOptions?.let { found ->
+                Text(if (found.isEmpty()) t.webNothing else t.pickOne, fontSize = 13.sp, color = C.Ink2)
+                found.forEach { o ->
+                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(C.IndigoWash).clickable { name = o.name; unit = o.unit }.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(o.name, Modifier.weight(1f), fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = C.Ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(listOfNotNull(o.unit.lowercase(), o.approxPrice?.let { t.about(it.toInt()) }).joinToString(" · "), fontSize = 13.sp, color = C.Ink2)
+                    }
+                }
+            }
             Heading(t.unit)
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("PCS", "KG", "LTR", "PKT", "BOX", "BTL").forEach { u -> Pick(u.lowercase(), unit == u) { unit = u } }

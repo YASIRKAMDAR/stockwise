@@ -122,6 +122,7 @@ class EndToEndTest {
                     p == "/orders" && request.method == "POST" -> { orderStatus = "DRAFT"; json("""{"id":"o1","number":7,"status":"DRAFT"}""", 201) }
                     p == "/orders/o1/send" -> { orderStatus = "SENT"; json(orderJson()) }
                     p == "/orders/o1/deliveries" -> { orderStatus = "RECEIVED"; json("""{"deliveryId":"d1","orderStatus":"RECEIVED","flags":[],"creditDue":0.0}""", 201) }
+                    p == "/orders/o1/read-bill" -> json("""{"read":true,"lines":[{"productId":"i1","name":"Paneer","quantity":18,"unitPrice":320.0}],"extras":[],"missing":[],"billTotal":null}""")
                     p == "/orders/o1" -> json(orderJson())
                     else -> json("""{"error":{"code":"NOT_FOUND","message":"no route $p"}}""", 404)
                 }
@@ -283,12 +284,16 @@ class EndToEndTest {
         rule.waitForIdle()
         rule.onNodeWithText("Check").performClick(); pump()
         waitFor(s, "check page", 10_000) { s.page is Page.Check }
+        // A photo of the bill is read and fills in what came (18 of the 20 ordered).
+        s.readBill(ByteArray(16))
+        waitFor(s, "bill read", 10_000) { s.bill?.read == true && !s.reading }
+        pump(); rule.waitForIdle()
         rule.onNodeWithText("1 week").performClick(); pump()
         rule.onNodeWithText("Add to stock").performClick(); pump()
         waitFor(s, "delivery saved", 10_000) { received.any { it.path == "/orders/o1/deliveries" } && s.page == null && !s.busy }
         val d = received.last { it.path == "/orders/o1/deliveries" }
         val checked = d.body.readUtf8()
-        assertTrue(checked, checked.contains("\"productId\":\"i1\"") && checked.contains("\"received\":20") && checked.contains("\"expiryDate\":\""))
+        assertTrue(checked, checked.contains("\"productId\":\"i1\"") && checked.contains("\"received\":18") && checked.contains("\"expiryDate\":\""))
         assertTrue(d.getHeader("idempotency-key") != null)
 
         // Spoken in one go: a draft card waits; nothing is saved until Confirm.

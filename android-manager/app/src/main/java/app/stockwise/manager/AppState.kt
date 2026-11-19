@@ -67,6 +67,12 @@ class AppState(ctx: Context, apiBase: String = BuildConfig.API_BASE) {
     var found by mutableStateOf<List<CatalogItem>>(emptyList())
     /** Photos taken while checking a delivery (BILL or GOODS), sent once the delivery is saved. */
     var photos by mutableStateOf<List<Pair<String, ByteArray>>>(emptyList())
+    /** What the bill photo says for the delivery being checked, and whether it is being read right now. */
+    var bill by mutableStateOf<BillRead?>(null)
+    var reading by mutableStateOf(false)
+    /** Pack sizes found on the web while adding an item (null = not looked up yet). */
+    var webOptions by mutableStateOf<List<WebOption>?>(null)
+    var lookingUp by mutableStateOf(false)
     private var searchJob: Job? = null
 
     // Voice / conversation
@@ -365,7 +371,7 @@ class AppState(ctx: Context, apiBase: String = BuildConfig.API_BASE) {
         } catch (e: Exception) { handle(e) }
     }
     fun openOrder(o: OrderSummary) = scope.launch {
-        try { val full = api.order(o.id); photos = emptyList(); page = if (full.status == "DRAFT") Page.Message(full) else Page.Check(full) } catch (e: Exception) { handle(e) }
+        try { val full = api.order(o.id); photos = emptyList(); bill = null; page = if (full.status == "DRAFT") Page.Message(full) else Page.Check(full) } catch (e: Exception) { handle(e) }
     }
     fun editOrder(o: Order) { found = emptyList(); page = Page.OrderForm(NamedRef(o.supplier.id, o.supplier.name), o.lines.map { FormLine(it.productId, it.name, it.unit, it.store, qty = it.quantity) }, o.id) }
     /** Marks the order as sent and opens WhatsApp with the message ready (or the dialler). */
@@ -394,7 +400,15 @@ class AppState(ctx: Context, apiBase: String = BuildConfig.API_BASE) {
             }.getOrNull()
         }
         runCatching { file.delete() }
-        if (jpeg != null) photos = (photos + (kind to jpeg)).takeLast(6) else notice = Notice(t.noCamera)
+        if (jpeg != null) { photos = (photos + (kind to jpeg)).takeLast(6); if (kind == "BILL") readBill(jpeg) } else notice = Notice(t.noCamera)
+    }
+    /** Reads the bill photo against the order so the numbers come pre-filled. If it cannot be read, counting by hand works as before. */
+    fun readBill(jpeg: ByteArray) = scope.launch {
+        val o = (page as? Page.Check)?.order ?: return@launch
+        reading = true
+        val r = try { api.readBill(o.id, jpeg) } catch (e: ApiException) { null } catch (e: OfflineException) { null }
+        reading = false
+        if (r?.read == true && r.lines.isNotEmpty()) bill = r else notice = Notice(t.billNotRead, warn = false)
     }
     fun submitCheck(o: Order, lines: List<DeliveryLineBody>) = scope.launch {
         if (lines.isEmpty()) return@launch
@@ -410,7 +424,15 @@ class AppState(ctx: Context, apiBase: String = BuildConfig.API_BASE) {
     }
 
     // ---------- items ----------
-    fun newItem() { page = Page.AddItem; scope.launch { loadCategories() } }
+    fun newItem() { page = Page.AddItem; webOptions = null; scope.launch { loadCategories() } }
+    fun lookupItem(q: String) = scope.launch {
+        lookingUp = true
+        webOptions = try { api.lookup(q.trim()).options } catch (e: ApiException) { emptyList() } catch (e: OfflineException) { emptyList() }
+        lookingUp = false
+    }
+    private fun wantsCheck(text: String) = Regex("(check|चेक|जांच|जाँच|ચેક|તપાસ).{0,20}(delivery|डिलीवरी|ડિલિવરી)|(delivery|डिलीवरी|ડિલિવરી).{0,20}(check|aa ?ga|aayi|aavi|आ गई|आ गया|આવી|चेक|ચેક)").containsMatchIn(text.lowercase())
+    /** "Check the delivery": straight to the one that is due, or to the list when there are several. */
+    private fun goCheck() { val due = home?.deliveriesDue ?: emptyList(); chat = emptyList(); if (due.size == 1) openOrder(due[0]) else go(Tab.ORDERS) }
     fun addItem(name: String, unit: String, categoryId: String?) = scope.launch {
         try {
             val c = api.createItem(name.trim(), unit, categoryId)
@@ -494,6 +516,7 @@ class AppState(ctx: Context, apiBase: String = BuildConfig.API_BASE) {
         form()?.let { busy = true; speakInto(it, text); busy = false; return@launch }
         post(ChatBody.Said(text, durationMs > 0), Role.ME)
         localCommand(text)?.let { applyLocal(it); return@launch }
+        if (wantsCheck(text)) { goCheck(); return@launch }
         if (wantsOrder(text)) { busy = true; val drafted = tryDraft(text, mic); busy = false; if (drafted) return@launch }
         ask(mic) { api.interpret(h, text, lang, durationMs, voiceMode) }
     }
@@ -524,6 +547,7 @@ class AppState(ctx: Context, apiBase: String = BuildConfig.API_BASE) {
                 if (m.id != target) m else { val said = m.body as ChatBody.Said; m.copy(body = said.copy(text = if (bubbleId != null) p.transcript.ifBlank { said.text } else said.text, lang = tag)) }
             }
             if (bubbleId != null) localCommand(p.transcript)?.let { applyLocal(it); return }
+            if (bubbleId != null && wantsCheck(p.transcript)) { goCheck(); return }
             if (bubbleId != null && wantsOrder(p.transcript) && tryDraft(p.transcript, mic)) return
             if ("FALLBACK_RULES" in p.warnings) post(ChatBody.Text(t.fromPhoneWords, true))
             handleProposal(p, mic)

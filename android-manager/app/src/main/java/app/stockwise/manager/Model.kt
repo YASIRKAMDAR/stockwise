@@ -83,6 +83,12 @@ import kotlinx.serialization.json.JsonElement
 @Serializable data class OrderDraft(val text: String = "", val supplier: NamedRef? = null, val lines: List<DraftLine> = emptyList(), val total: Double = 0.0, val ready: Boolean = false)
 @Serializable data class Flag(val productId: String = "", val kind: String = "", val detail: String = "")
 @Serializable data class DeliveryResult(val deliveryId: String, val orderStatus: String? = null, val flags: List<Flag> = emptyList(), val creditDue: Double = 0.0)
+@Serializable data class BillLine(val productId: String, val name: String = "", val quantity: Int = 0, val unitPrice: Double? = null)
+@Serializable data class BillExtra(val name: String = "", val quantity: Double? = null)
+/** What was read off a photo of the supplier's bill, matched to the order. A suggestion only: the manager checks it. */
+@Serializable data class BillRead(val read: Boolean = false, val lines: List<BillLine> = emptyList(), val extras: List<BillExtra> = emptyList(), val missing: List<String> = emptyList(), val billTotal: Double? = null)
+@Serializable data class WebOption(val name: String, val brand: String? = null, val pack: String? = null, val unit: String = "PCS", val approxPrice: Double? = null)
+@Serializable data class Lookup(val available: Boolean = true, val options: List<WebOption> = emptyList())
 @Serializable data class Created(val id: String, val number: Int? = null, val existed: Boolean = false)
 
 // App state shapes

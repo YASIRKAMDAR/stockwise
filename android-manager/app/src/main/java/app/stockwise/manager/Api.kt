@@ -117,6 +117,11 @@ class Api(private val store: Store, private val base: String = BuildConfig.API_B
     suspend fun draftOrder(siteId: String, text: String, supplierId: String? = null): OrderDraft = json.decodeFromString(OrderDraft.serializer(), post("/orders/draft-from-text", json.encodeToString(DraftAsk.serializer(), DraftAsk(siteId, text, supplierId))))
     suspend fun checkIn(orderId: String, lines: List<DeliveryLineBody>, key: String): DeliveryResult =
         json.decodeFromString(DeliveryResult.serializer(), post("/orders/$orderId/deliveries", json.encodeToString(DeliveryBody.serializer(), DeliveryBody(lines)), key))
+    suspend fun readBill(orderId: String, jpeg: ByteArray): BillRead {
+        val body = MultipartBody.Builder().setType(MultipartBody.FORM).addFormDataPart("photo", "bill.jpg", jpeg.toRequestBody("image/jpeg".toMediaType())).build()
+        return json.decodeFromString(BillRead.serializer(), raw("POST", "/orders/$orderId/read-bill", body))
+    }
+    suspend fun lookup(q: String): Lookup = json.decodeFromString(Lookup.serializer(), raw("GET", "/catalog/lookup?q=" + enc(q)))
     suspend fun uploadPhoto(deliveryId: String, kind: String, jpeg: ByteArray) {
         val body = MultipartBody.Builder().setType(MultipartBody.FORM).addFormDataPart("kind", kind).addFormDataPart("photo", "photo.jpg", jpeg.toRequestBody("image/jpeg".toMediaType())).build()
         raw("POST", "/deliveries/$deliveryId/photos", body)

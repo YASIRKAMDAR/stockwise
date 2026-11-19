@@ -144,7 +144,14 @@ class ScreensTest {
         shot("m35-order", s)
     }
     @Test fun m36_order_message() { val s = buying(); s.tab = Tab.ORDERS; s.page = Page.Message(order); shot("m36-order-message", s) }
-    @Test fun m37_check_delivery() { val s = buying(); s.tab = Tab.ORDERS; s.page = Page.Check(order.copy(status = "SENT")); s.photos = listOf("BILL" to ByteArray(1)); shot("m37-check-delivery", s) }
+    @Test fun m37_check_delivery() { val s = buying(); s.tab = Tab.ORDERS; s.page = Page.Check(order.copy(status = "SENT")); s.photos = listOf("BILL" to ByteArray(1))
+        s.bill = BillRead(true, listOf(BillLine("i1", "Paneer", 18, 340.0), BillLine("i2", "Amul Butter 500 g", 24, 285.0)), listOf(BillExtra("Delivery charge", 1.0)), listOf("i3"))
+        shot("m37-check-delivery", s) }
+    @Test fun m41_add_item() {
+        val s = buying(); s.tab = Tab.STOCK; s.page = Page.AddItem
+        s.webOptions = listOf(WebOption("Amul Cheese Slices 200 g", "Amul", "200 g", "PKT", 145.0), WebOption("Amul Processed Cheese Block 1 kg", "Amul", "1 kg", "KG", 560.0), WebOption("Amul Cheese Cubes 200 g", "Amul", "200 g", "PKT", 135.0))
+        shot("m41-add-item", s)
+    }
     @Test fun m38_orders() { val s = buying(); s.tab = Tab.ORDERS; shot("m38-orders", s) }
     @Test fun m39_warehouse_stock() {
         val s = buying(); s.tab = Tab.STOCK

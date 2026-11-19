@@ -22,6 +22,7 @@ import { addDeliveryPhoto, cancelOrder, createOrder, draftOrderFromText, getDeli
 import { createRequest, declineRequest, deleteSchedule, dispatchRequest, listRequests, listSchedules, runDueSchedules, topUpLines, upsertSchedule, warehouseOf } from '../services/requests.ts';
 import { interpret, myVoiceAttempts, voiceHealth, voiceUsage } from '../voice/service.ts';
 import type { VoiceProvider } from '../voice/provider.ts';
+import { lookupItem, readBill } from '../services/assist.ts';
 
 interface Deps { db: Db; cfg: Config; provider: VoiceProvider | null }
 
@@ -387,6 +388,17 @@ export async function registerRoutes(app: FastifyInstance, { db, cfg, provider }
     if (!file) throw err('INVALID_INPUT', 'No photo received');
     return reply.code(201).send(await addDeliveryPhoto(db, a, pid(req), kind === 'BILL' ? 'BILL' : 'GOODS', file, mime));
   });
+  // Reads a bill photo against the order so the delivery check comes pre-filled. Saves nothing.
+  app.post('/orders/:id/read-bill', async (req) => {
+    const a = requireActor(req);
+    if (!req.isMultipart()) throw err('INVALID_INPUT', 'multipart/form-data expected');
+    let file: Buffer | null = null; let mime = '';
+    for await (const part of req.parts({ limits: { fileSize: 4 * 1024 * 1024, files: 1, fields: 3 } })) { if (part.type === 'file') { file = await part.toBuffer(); mime = part.mimetype; } }
+    if (!file) throw err('INVALID_INPUT', 'No photo received');
+    return readBill(db, cfg, a, pid(req), file, mime);
+  });
+  // Pack sizes and rough prices from the web, to pick from when adding an item.
+  app.get('/catalog/lookup', async (req) => { const a = requireActor(req); requireManager(a); return lookupItem(cfg, String(Q(req).q ?? '')); });
   app.get('/delivery-photos/:id', async (req, reply) => {
     const ph = await getDeliveryPhoto(db, requireActor(req), pid(req));
     return reply.header('content-type', ph.contentType).header('cache-control', 'private, max-age=86400').send(ph.data);
