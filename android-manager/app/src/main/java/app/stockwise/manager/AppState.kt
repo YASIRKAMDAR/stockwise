@@ -469,7 +469,7 @@ class AppState(ctx: Context, apiBase: String = BuildConfig.API_BASE) {
                 bill = r.bill; chat = emptyList(); page = Page.Check(full)
             } catch (e: Exception) { handle(e) }
             r.type == "ORDER" && d != null -> post(ChatBody.Draft(d))
-            else -> post(ChatBody.Text(r.summary?.takeIf { it.isNotBlank() }?.let { t.docSaw(it) } ?: t.docNothing))
+            else -> post(ChatBody.Text(r.summary?.takeIf { it.isNotBlank() }?.let { t.docSaw(it) } ?: t.docNothing, true))
         }
     }
 
