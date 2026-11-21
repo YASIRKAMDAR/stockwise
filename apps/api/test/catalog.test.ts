@@ -234,6 +234,21 @@ describe('Help from the bill and the web', () => {
     expect(await count()).toBe(before);
     await whm.post(`/orders/${o.body.id}/cancel`, {});
   });
+  it('a document added with + becomes a delivery check when its order is on the way, otherwise an order draft', async () => {
+    const send = async (text: string) => { const f = multipart({}, text); return whm.req('POST', `/sites/${wh}/read-document`, f.body, { headers: f.headers }); };
+    const list = await send('LIST: Shree Dairy\nAmul Butter fresh pack, 12, 600\nAmul Cheese, 3\nUnicorn dust, 1');
+    expect(list.status).toBe(200);
+    expect(list.body.type).toBe('ORDER');
+    expect(list.body.draft.supplier).toMatchObject({ id: dairy });
+    expect(list.body.draft.lines.map((l: any) => [l.match?.productId ?? null, l.quantity])).toEqual([[item['ITM-0019'], 12], [item['ITM-0021'], 3], [null, 1]]);
+    expect(list.body.draft.ready).toBe(false);
+    const o = await whm.post('/orders', { siteId: wh, supplierId: dairy, lines: [{ productId: item['ITM-0019'], quantity: 10, unitPrice: 590 }, { productId: item['ITM-0021'], quantity: 4 }] });
+    await whm.post(`/orders/${o.body.id}/send`, {});
+    const bill = await send('BILL: Shree Dairy Pvt Ltd\nAmul Butter, 9, 610\nCrate deposit, 1, 50');
+    expect(bill.body).toMatchObject({ type: 'DELIVERY', orderId: o.body.id, bill: { read: true, lines: [{ productId: item['ITM-0019'], quantity: 9, unitPrice: 610 }], extras: [{ name: 'Crate deposit', quantity: 1 }], missing: [item['ITM-0021']] } });
+    expect((await send('OTHER: a holiday photo')).body.type).toBe('NONE');
+    await whm.post(`/orders/${o.body.id}/cancel`, {});
+  });
   it('web lookup gives options to pick from and is for managers', async () => {
     const r = await whm.get('/catalog/lookup?q=amul%20cheese');
     expect(r.status).toBe(200);

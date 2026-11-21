@@ -29,6 +29,12 @@ import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.FileProvider
+import java.io.File
 import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.TouchApp
@@ -218,7 +224,23 @@ fun VoiceBar(s: AppState, mic: Mic) {
     var level by remember { mutableFloatStateOf(0f) }
     // Recordings stop by themselves at 15 s: long holds cost more and understand less.
     LaunchedEffect(live) { if (live) { delay(15_000); if (live) mic.release() } }
+    // The + button: take a photo, or choose a photo or PDF already on the phone.
+    val ctx = LocalContext.current
+    var menu by remember { mutableStateOf(false) }
+    var shot by rememberSaveable { mutableStateOf("") }
+    val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok -> val path = shot; shot = ""; if (ok && path.isNotEmpty()) s.attachFile(File(path)) }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) s.attachUri(uri) }
+    Box {
+    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+        DropdownMenuItem(text = { Text("📷  " + t.takePhoto, fontSize = 17.sp) }, onClick = {
+            menu = false
+            val f = File(ctx.cacheDir, "doc-${System.currentTimeMillis()}.jpg"); shot = f.path
+            if (runCatching { camera.launch(FileProvider.getUriForFile(ctx, ctx.packageName + ".files", f)) }.isFailure) s.notice = Notice(t.noCamera)
+        })
+        DropdownMenuItem(text = { Text("📄  " + t.chooseFile, fontSize = 17.sp) }, onClick = { menu = false; runCatching { picker.launch(arrayOf("image/*", "application/pdf")) } })
+    }
     Composer(
+        onPlus = if (s.page is Page.Chat) null else ({ menu = true }), plusText = t.addFile,
         placeholder = if (s.page is Page.Chat) t.writeMessage else if (s.page is Page.OrderForm) t.sayItems else if (s.voiceMode == "count") t.countHere else t.askHere, slideText = t.slideToCancel, releaseCancelText = t.releaseToCancel,
         live = live, startedAt = startedAt, interim = interim, level = level, busy = s.busy, waitingLong = s.waitingLong,
         stillAsking = t.stillAsking, micAvailable = s.cloudVoice || mic.available,
@@ -247,6 +269,7 @@ fun VoiceBar(s: AppState, mic: Mic) {
         onCancel = { if (live) { mic.cancel(); live = false } },
         onTap = { s.notice = Notice(if (!mic.hasPermission()) t.micDenied else t.holdHint, warn = false) },
     )
+    }
 }
 
 /** The conversation as its own screen: what was asked on the right, answers on the left, newest at the bottom; one-tap ways back. */

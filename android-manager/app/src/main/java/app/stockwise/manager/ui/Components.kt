@@ -27,6 +27,8 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.draw.shadow
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
@@ -76,6 +78,7 @@ fun Composer(
     modifier: Modifier = Modifier,
     level: Float = 0f, waitingLong: Boolean = false, stillAsking: String = "",
     draft: String? = null, onDraft: (String) -> Unit = {},
+    onPlus: (() -> Unit)? = null, plusText: String = "Add",
 ) {
     var local by remember { mutableStateOf("") }
     val text = draft ?: local
@@ -84,42 +87,50 @@ fun Composer(
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(live) { while (live) { now = System.currentTimeMillis(); delay(250) } }
     val submit = { val v = text.trim(); if (v.isNotEmpty() && !busy) { setText(""); onText(v) } }
-    Row(modifier.fillMaxWidth().background(C.Linen).padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.weight(1f).height(56.dp).clip(RoundedCornerShape(28.dp)).background(C.Paper)
-            .border(1.5.dp, if (live) (if (armed) C.Ink3 else C.Brick) else C.Line, RoundedCornerShape(28.dp)).padding(horizontal = 20.dp),
-            contentAlignment = Alignment.CenterStart) {
-            if (busy && waitingLong) {
-                Text(stillAsking, color = C.Ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            } else if (live) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    LevelMeter(level)
-                    Spacer(Modifier.width(8.dp))
-                    Text(fmtSecs(now - startedAt), fontWeight = FontWeight.Bold, color = C.Ink)
-                    Spacer(Modifier.width(10.dp))
-                    Text(if (armed) releaseCancelText else interim.ifBlank { slideText }, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        color = if (armed) C.Brick else C.Ink2, fontWeight = if (armed) FontWeight.Bold else FontWeight.Normal)
+    // One box, like a chat app: + on the left to add a photo or PDF, the words in the middle, the mic inside on the right.
+    val pill = RoundedCornerShape(30.dp)
+    Box(modifier.fillMaxWidth().background(C.Linen).padding(horizontal = 12.dp, vertical = 10.dp)) {
+        Row(Modifier.fillMaxWidth().height(60.dp).shadow(4.dp, pill).clip(pill).background(C.Paper)
+            .border(1.dp, if (live) (if (armed) C.Ink3 else C.Brick) else C.Line, pill).padding(start = 6.dp, end = 8.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            if (onPlus != null) {
+                Box(Modifier.size(44.dp).clip(CircleShape).then(if (busy || live) Modifier else Modifier.clickable(onClick = onPlus)).semantics { contentDescription = plusText }, contentAlignment = Alignment.Center) {
+                    Icon(Icons.Filled.Add, null, tint = if (busy || live) C.Ink3 else C.Ink, modifier = Modifier.size(28.dp))
                 }
-            } else {
-                BasicTextField(value = text, onValueChange = setText, singleLine = true, enabled = !busy,
-                    textStyle = TextStyle(fontSize = 17.sp, color = C.Ink), cursorBrush = SolidColor(C.Indigo),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send), keyboardActions = KeyboardActions(onSend = { submit() }),
-                    modifier = Modifier.fillMaxWidth().semantics { contentDescription = placeholder },
-                    decorationBox = { inner -> if (text.isEmpty()) Text(placeholder, color = C.Ink3, maxLines = 1); inner() })
+            } else Spacer(Modifier.width(14.dp))
+            Box(Modifier.weight(1f).padding(horizontal = 6.dp), contentAlignment = Alignment.CenterStart) {
+                if (busy && waitingLong) {
+                    Text(stillAsking, color = C.Ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                } else if (live) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        LevelMeter(level)
+                        Spacer(Modifier.width(8.dp))
+                        Text(fmtSecs(now - startedAt), fontWeight = FontWeight.Bold, color = C.Ink)
+                        Spacer(Modifier.width(10.dp))
+                        Text(if (armed) releaseCancelText else interim.ifBlank { slideText }, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            color = if (armed) C.Brick else C.Ink2, fontWeight = if (armed) FontWeight.Bold else FontWeight.Normal)
+                    }
+                } else {
+                    BasicTextField(value = text, onValueChange = setText, singleLine = true, enabled = !busy,
+                        textStyle = TextStyle(fontSize = 17.sp, color = C.Ink), cursorBrush = SolidColor(C.Indigo),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send), keyboardActions = KeyboardActions(onSend = { submit() }),
+                        modifier = Modifier.fillMaxWidth().semantics { contentDescription = placeholder },
+                        decorationBox = { inner -> if (text.isEmpty()) Text(placeholder, color = C.Ink3, maxLines = 1, overflow = TextOverflow.Ellipsis); inner() })
+                }
             }
-        }
-        Spacer(Modifier.width(8.dp))
-        val typing = text.isNotBlank() && !live
-        Box(Modifier.size(60.dp).scale(if (live) 1.15f else 1f).clip(CircleShape)
-            .background(when { busy -> C.Line; typing -> C.Mint; live && armed -> C.Ink3; live -> C.Brick; else -> C.Marigold })
-            .then(if (typing) Modifier.clickable { submit() } else if (busy) Modifier else Modifier.holdToTalk(
-                onStart = { if (micAvailable) onStart() }, onSend = { if (micAvailable) onSend() else onTap() },
-                onCancel = { if (micAvailable) onCancel() }, onTap = onTap, onArm = { armed = it }))
-            .semantics { contentDescription = if (typing) "Send" else "Hold to talk" },
-            contentAlignment = Alignment.Center) {
-            when {
-                busy -> CircularProgressIndicator(Modifier.size(26.dp), color = C.Ink, strokeWidth = 3.dp)
-                typing -> Icon(Icons.AutoMirrored.Filled.Send, null, tint = Color.White, modifier = Modifier.size(28.dp))
-                else -> Icon(Icons.Filled.Mic, null, tint = if (live) Color.White else C.Ink, modifier = Modifier.size(30.dp))
+            val typing = text.isNotBlank() && !live
+            Box(Modifier.size(46.dp).clip(CircleShape)
+                .background(when { typing -> C.Indigo; live && armed -> C.Ink3; live -> C.Brick; else -> Color.Transparent })
+                .then(if (typing) Modifier.clickable { submit() } else if (busy) Modifier else Modifier.holdToTalk(
+                    onStart = { if (micAvailable) onStart() }, onSend = { if (micAvailable) onSend() else onTap() },
+                    onCancel = { if (micAvailable) onCancel() }, onTap = onTap, onArm = { armed = it }))
+                .semantics { contentDescription = if (typing) "Send" else "Hold to talk" },
+                contentAlignment = Alignment.Center) {
+                when {
+                    busy -> CircularProgressIndicator(Modifier.size(24.dp), color = C.Ink, strokeWidth = 3.dp)
+                    typing -> Icon(Icons.AutoMirrored.Filled.Send, null, tint = Color.White, modifier = Modifier.size(24.dp))
+                    else -> Icon(Icons.Filled.Mic, null, tint = if (live) Color.White else C.Ink, modifier = Modifier.size(28.dp))
+                }
             }
         }
     }

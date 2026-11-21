@@ -411,26 +411,78 @@ class AppState(ctx: Context, apiBase: String = BuildConfig.API_BASE) {
 
     // ---------- checking a delivery ----------
     /** Keeps a phone photo as a small JPEG (long side 1600 px) so it uploads on a weak signal. */
-    fun addPhoto(kind: String, file: File) = scope.launch {
-        val jpeg = withContext(Dispatchers.IO) {
-            runCatching {
-                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                BitmapFactory.decodeFile(file.path, bounds)
-                var sample = 1
-                while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 1600) sample *= 2
-                val bmp = BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = sample })
-                val out = ByteArrayOutputStream()
-                if (bmp != null && bmp.compress(Bitmap.CompressFormat.JPEG, 80, out)) out.toByteArray() else null
-            }.getOrNull()
+    private fun shrink(raw: ByteArray): ByteArray? = runCatching {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(raw, 0, raw.size, bounds)
+        var sample = 1
+        while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 1600) sample *= 2
+        val bmp = BitmapFactory.decodeByteArray(raw, 0, raw.size, BitmapFactory.Options().apply { inSampleSize = sample })
+        val out = ByteArrayOutputStream()
+        if (bmp != null && bmp.compress(Bitmap.CompressFormat.JPEG, 80, out)) out.toByteArray() else null
+    }.getOrNull()
+
+    /** The + button: a photo just taken, or a photo or PDF chosen from the phone. */
+    fun attachFile(file: File) = scope.launch {
+        val jpeg = withContext(Dispatchers.IO) { runCatching { shrink(file.readBytes()) }.getOrNull() }
+        runCatching { file.delete() }
+        if (jpeg != null) attach(jpeg, "image/jpeg") else notice = Notice(t.noCamera)
+    }
+    fun attachUri(uri: Uri) = scope.launch {
+        val pdf = app.contentResolver.getType(uri) == "application/pdf"
+        val bytes = withContext(Dispatchers.IO) { runCatching { app.contentResolver.openInputStream(uri)?.use { it.readBytes() }?.let { if (pdf) it else shrink(it) } }.getOrNull() }
+        when {
+            bytes == null -> notice = Notice(t.fileNotOpened)
+            bytes.size > 4_000_000 -> notice = Notice(t.fileTooBig)
+            else -> attach(bytes, if (pdf) "application/pdf" else "image/jpeg")
         }
+    }
+    /**
+     * What happens to the file depends on where you are: while checking a delivery it is that delivery's bill; on the order
+     * screen its items are added to the order; anywhere else the app works out whether it is a bill or a list. Nothing is saved until you confirm.
+     */
+    fun attach(bytes: ByteArray, mime: String) = scope.launch {
+        val h = hotelId ?: return@launch
+        notice = null
+        val image = mime != "application/pdf"
+        if (page is Page.Check) { if (image) photos = (photos + ("BILL" to bytes)).takeLast(6); readBill(bytes, mime); return@launch }
+        val f = form()
+        if (f == null) { page = null; post(ChatBody.Said(if (image) "📷 " + t.aPhoto else "📄 PDF", false), Role.ME) }
+        busy = true
+        val r = try { api.readDocument(h, bytes, mime) } catch (e: ApiException) { handle(e); null } catch (e: OfflineException) { handle(e); null }
+        busy = false
+        if (r == null) return@launch
+        val d = r.draft
+        when {
+            f != null -> {
+                val got = d?.let { draftLines(it) } ?: emptyList()
+                val cur = form()
+                if (got.isEmpty() || cur == null) notice = Notice(t.docNothing)
+                else {
+                    val merged = cur.lines.map { l -> got.firstOrNull { it.productId == l.productId && it.qty > 0 }?.let { g -> l.copy(qty = g.qty) } ?: l }
+                    page = cur.copy(lines = got.filter { g -> cur.lines.none { it.productId == g.productId } } + merged)
+                    notice = Notice(got.joinToString(", ") { "${it.name} ${it.qty}" }, warn = false)
+                }
+            }
+            r.type == "DELIVERY" && r.orderId != null && r.bill != null -> try {
+                val full = api.order(r.orderId)
+                photos = if (image) listOf("BILL" to bytes) else emptyList()
+                bill = r.bill; chat = emptyList(); page = Page.Check(full)
+            } catch (e: Exception) { handle(e) }
+            r.type == "ORDER" && d != null -> post(ChatBody.Draft(d))
+            else -> post(ChatBody.Text(r.summary?.takeIf { it.isNotBlank() }?.let { t.docSaw(it) } ?: t.docNothing))
+        }
+    }
+
+    fun addPhoto(kind: String, file: File) = scope.launch {
+        val jpeg = withContext(Dispatchers.IO) { runCatching { shrink(file.readBytes()) }.getOrNull() }
         runCatching { file.delete() }
         if (jpeg != null) { photos = (photos + (kind to jpeg)).takeLast(6); if (kind == "BILL") readBill(jpeg) } else notice = Notice(t.noCamera)
     }
     /** Reads the bill photo against the order so the numbers come pre-filled. If it cannot be read, counting by hand works as before. */
-    fun readBill(jpeg: ByteArray) = scope.launch {
+    fun readBill(jpeg: ByteArray, mime: String = "image/jpeg") = scope.launch {
         val o = (page as? Page.Check)?.order ?: return@launch
         reading = true
-        val r = try { api.readBill(o.id, jpeg) } catch (e: ApiException) { null } catch (e: OfflineException) { null }
+        val r = try { api.readBill(o.id, jpeg, mime) } catch (e: ApiException) { null } catch (e: OfflineException) { null }
         reading = false
         if (r?.read == true && r.lines.isNotEmpty()) bill = r else notice = Notice(t.billNotRead, warn = false)
     }

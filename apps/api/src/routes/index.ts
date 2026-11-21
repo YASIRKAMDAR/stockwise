@@ -22,7 +22,7 @@ import { addDeliveryPhoto, cancelOrder, createOrder, draftOrderFromText, getDeli
 import { createRequest, declineRequest, deleteSchedule, dispatchRequest, listRequests, listSchedules, runDueSchedules, topUpLines, upsertSchedule, warehouseOf } from '../services/requests.ts';
 import { interpret, myVoiceAttempts, voiceHealth, voiceUsage } from '../voice/service.ts';
 import type { VoiceProvider } from '../voice/provider.ts';
-import { lookupItem, readBill } from '../services/assist.ts';
+import { lookupItem, readBill, readDocument } from '../services/assist.ts';
 import { inbox, listMessages, noteDelivery, noteOrderSent, noteRequest, postMessage } from '../services/messages.ts';
 
 interface Deps { db: Db; cfg: Config; provider: VoiceProvider | null }
@@ -397,6 +397,15 @@ export async function registerRoutes(app: FastifyInstance, { db, cfg, provider }
     for await (const part of req.parts({ limits: { fileSize: 4 * 1024 * 1024, files: 1, fields: 3 } })) { if (part.type === 'file') { file = await part.toBuffer(); mime = part.mimetype; } }
     if (!file) throw err('INVALID_INPUT', 'No photo received');
     return readBill(db, cfg, a, pid(req), file, mime);
+  });
+  // A photo or PDF added with the + button: a bill becomes a delivery check, a list becomes an order draft. Saves nothing.
+  app.post('/sites/:id/read-document', async (req) => {
+    const a = requireActor(req);
+    if (!req.isMultipart()) throw err('INVALID_INPUT', 'multipart/form-data expected');
+    let file: Buffer | null = null; let mime = '';
+    for await (const part of req.parts({ limits: { fileSize: 4 * 1024 * 1024, files: 1, fields: 3 } })) { if (part.type === 'file') { file = await part.toBuffer(); mime = part.mimetype; } }
+    if (!file) throw err('INVALID_INPUT', 'No file received');
+    return readDocument(db, cfg, a, pid(req), file, mime);
   });
   // Pack sizes and rough prices from the web, to pick from when adding an item.
   app.get('/catalog/lookup', async (req) => { const a = requireActor(req); requireManager(a); return lookupItem(cfg, String(Q(req).q ?? '')); });

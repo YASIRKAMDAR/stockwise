@@ -120,8 +120,10 @@ class Api(private val store: Store, private val base: String = BuildConfig.API_B
     suspend fun inbox(): Inbox = json.decodeFromString(Inbox.serializer(), raw("GET", "/inbox"))
     suspend fun messages(siteId: String): ChatThread = json.decodeFromString(ChatThread.serializer(), raw("GET", "/sites/$siteId/messages"))
     suspend fun postMessage(siteId: String, body: String) { post("/sites/$siteId/messages", json.encodeToString(MsgBody.serializer(), MsgBody(body))) }
-    suspend fun readBill(orderId: String, jpeg: ByteArray): BillRead {
-        val body = MultipartBody.Builder().setType(MultipartBody.FORM).addFormDataPart("photo", "bill.jpg", jpeg.toRequestBody("image/jpeg".toMediaType())).build()
+    private fun filePart(bytes: ByteArray, mime: String) = MultipartBody.Builder().setType(MultipartBody.FORM).addFormDataPart("file", if (mime == "application/pdf") "file.pdf" else "photo.jpg", bytes.toRequestBody(mime.toMediaType())).build()
+    suspend fun readDocument(siteId: String, bytes: ByteArray, mime: String): DocRead = json.decodeFromString(DocRead.serializer(), raw("POST", "/sites/$siteId/read-document", filePart(bytes, mime)))
+    suspend fun readBill(orderId: String, jpeg: ByteArray, mime: String = "image/jpeg"): BillRead {
+        val body = filePart(jpeg, mime)
         return json.decodeFromString(BillRead.serializer(), raw("POST", "/orders/$orderId/read-bill", body))
     }
     suspend fun lookup(q: String): Lookup = json.decodeFromString(Lookup.serializer(), raw("GET", "/catalog/lookup?q=" + enc(q)))

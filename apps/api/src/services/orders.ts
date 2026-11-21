@@ -327,23 +327,34 @@ export async function draftOrderFromText(db: Db, actor: Actor, b: { siteId: stri
     if (lower.includes(' ' + nm + ' ') || lower.includes(' ' + nm + ',') || lower.includes(' ' + nm + '.')) { supplier = s; rest = text.replace(new RegExp(s.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), ','); break; }
     if (first.length >= 2 && first.every((w: string) => lower.includes(' ' + w))) { supplier = s; rest = first.reduce((acc: string, w: string) => acc.replace(new RegExp('\\b' + w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i'), ''), text); break; }
   }
-  const parts = splitSpokenOrder(rest);
+  const lines = await matchItems(db, actor, b.siteId, supplier?.id ?? null, splitSpokenOrder(rest));
+  return draftOf(text, supplier, lines);
+}
+
+/** Finds the catalog item for each phrase. `loose` (for names read off paper, which carry extra words) falls back to the first two words. */
+export async function matchItems(db: Db, actor: Actor, siteId: string, supplierId: string | null, parts: { quantity: number | null; phrase: string }[], loose = false) {
   const lines: any[] = [];
   for (const part of parts) {
     const words = part.phrase.split(' ').filter((w) => w.length > 1).slice(0, 6);
     if (!words.length) continue;
-    const likes = words.map((w) => `%${w.replace(/(es|s)$/, '')}%`);
-    const r = await db.query(
+    const find = (ws: string[]) => db.query(
       `SELECT p.id, p.name, p.unit, p.photo_url AS "photoUrl", p.last_price,
               (SELECT count(*)::int FROM purchase_orders o JOIN purchase_order_lines ol ON ol.order_id = o.id WHERE ol.product_id = p.id AND o.status <> 'CANCELLED' AND ($4::uuid IS NULL OR o.supplier_id = $4)) AS times,
               EXISTS (SELECT 1 FROM stock_balances sb JOIN stock_locations sl ON sl.id = sb.location_id WHERE sl.hotel_id = $3 AND sb.product_id = p.id) AS stocked
          FROM products p
         WHERE p.organization_id = $1 AND p.active
           AND (SELECT bool_and(lower(p.name) LIKE w OR EXISTS (SELECT 1 FROM product_aliases a WHERE a.product_id = p.id AND lower(a.alias) LIKE w)) FROM unnest($2::text[]) AS w)
-        ORDER BY (lower(p.name) = $5) DESC, times DESC, stocked DESC, length(p.name), p.name LIMIT 4`, [actor.orgId, likes, b.siteId, supplier?.id ?? null, part.phrase]);
+        ORDER BY (lower(p.name) = $5) DESC, times DESC, stocked DESC, length(p.name), p.name LIMIT 4`, [actor.orgId, ws.map((w) => `%${w.replace(/(es|s)$/, '')}%`), siteId, supplierId, part.phrase]);
+    let r = await find(words);
+    const fuzzy = loose && !r.rowCount && words.length > 2;
+    if (fuzzy) r = await find(words.slice(0, 2));
     const c = r.rows.map((x) => ({ productId: x.id, name: x.name, unit: x.unit, photoUrl: x.photoUrl, lastPrice: x.last_price == null ? null : Number(x.last_price), times: x.times }));
-    lines.push({ heard: part.phrase, quantity: part.quantity, match: c[0] ?? null, alternatives: c.slice(1), unsure: c.length !== 1 || part.quantity == null });
+    lines.push({ heard: part.phrase, quantity: part.quantity, match: c[0] ?? null, alternatives: c.slice(1), unsure: fuzzy || c.length !== 1 || part.quantity == null });
   }
+  return lines;
+}
+
+export function draftOf(text: string, supplier: { id: string; name: string } | null | undefined, lines: any[]) {
   const ok = lines.filter((l) => l.match && l.quantity);
   return {
     text, supplier: supplier ? { id: supplier.id, name: supplier.name } : null, lines,

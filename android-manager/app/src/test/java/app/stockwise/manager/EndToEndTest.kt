@@ -116,6 +116,8 @@ class EndToEndTest {
                     p.endsWith("/transfers/t1/receipts") && request.method == "POST" -> json("""{"ok":true}""", 201)
                     p.startsWith("/transactions") -> json("""{"items":[]}""")
                     p.startsWith("/me/voice-attempts") -> json("""{"attempts":[]}""")
+                    p == "/sites/wh/read-document" -> json("""{"type":"ORDER","read":true,"summary":"A list for Demo Dairy","draft":{"text":"","supplier":{"id":"s1","name":"Demo Dairy"},
+                        "lines":[{"heard":"Paneer fresh","quantity":30,"match":{"productId":"i1","name":"Paneer","unit":"KG","lastPrice":320.0},"alternatives":[],"unsure":false}],"total":9600.0,"ready":true}}""")
                     p == "/inbox" -> json("""{"unread":1,"threads":[{"siteId":"h1","siteName":"Demo Hotel 1","kind":"HOTEL","unread":1,"last":{"body":"Demo Hotel 1 asks the warehouse for: 48 Soap","kind":"REQUEST","createdAt":"2026-11-16T03:00:00Z","author":"Priya Shah"}}]}""")
                     p == "/sites/h1/messages" && request.method == "POST" -> { chatExtra = "," + """{"id":"m2","kind":"TEXT","body":"Sending in the afternoon","createdAt":"2026-11-16T03:05:00Z","mine":true,"author":"Priya Shah"}"""; json("""{"id":"m2"}""", 201) }
                     p == "/sites/h1/messages" -> json(chatJson())
@@ -336,5 +338,13 @@ class EndToEndTest {
         waitFor(s, "spoken order saved", 10_000) { s.page is Page.Message }
         val spoken = received.last { it.path == "/orders" && it.method == "POST" }.body.readUtf8()
         assertTrue(spoken, spoken.contains("\"source\":\"VOICE\"") && spoken.contains("\"quantity\":20"))
+
+        // The + button: a PDF list is read and waits as a draft too.
+        s.back(); s.clearChat(); pump()
+        rule.onNodeWithContentDescription("Add a photo or PDF").assertExists()
+        s.attach(ByteArray(64), "application/pdf")
+        waitFor(s, "document draft", 10_000) { s.chat.any { (it.body as? ChatBody.Draft)?.draft?.lines?.firstOrNull()?.quantity == 30 } && !s.busy }
+        val up = received.last { it.path == "/sites/wh/read-document" }
+        assertTrue(up.getHeader("content-type")?.startsWith("multipart/form-data") == true)
     }
 }

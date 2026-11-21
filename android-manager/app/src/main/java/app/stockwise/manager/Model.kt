@@ -95,6 +95,8 @@ import kotlinx.serialization.json.JsonElement
 @Serializable data class Inbox(val unread: Int = 0, val threads: List<ThreadRow> = emptyList())
 @Serializable data class Msg(val id: String, val kind: String = "TEXT", val body: String = "", val flagged: Boolean = false, val createdAt: String? = null, val refId: String? = null, val mine: Boolean = false, val author: String? = null, val refStatus: String? = null)
 @Serializable data class ChatThread(val siteId: String, val siteName: String = "", val canSend: Boolean = false, val messages: List<Msg> = emptyList())
+/** What a photo or PDF added with + turned out to be: a bill for a delivery on its way (DELIVERY), a list to order (ORDER), or nothing usable (NONE). */
+@Serializable data class DocRead(val type: String = "NONE", val read: Boolean = false, val summary: String? = null, val orderId: String? = null, val bill: BillRead? = null, val draft: OrderDraft? = null)
 @Serializable data class Created(val id: String, val number: Int? = null, val existed: Boolean = false)
 
 // App state shapes
